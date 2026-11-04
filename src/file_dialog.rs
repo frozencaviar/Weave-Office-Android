@@ -27,6 +27,31 @@ pub enum FileDialogResult {
     Cancelled,
 }
 
+/// The shell's document picker on Android: the system pickers are asynchronous (another
+/// Activity), so the host asks the shell for one and polls its answer once per frame.
+#[cfg(target_os = "android")]
+pub mod android {
+    use super::{FileDialogMode, FileDialogOptions, FileDialogResult};
+    use std::sync::OnceLock;
+
+    /// The shell's picker: `request` starts a picker and returns its id; `poll` answers it.
+    pub struct Picker {
+        pub request: Box<dyn Fn(FileDialogMode, &FileDialogOptions) -> u64 + Send + Sync>,
+        pub poll: Box<dyn Fn(u64) -> Option<FileDialogResult> + Send + Sync>,
+    }
+
+    static PICKER: OnceLock<Picker> = OnceLock::new();
+
+    /// Install the shell's picker, once, before the app starts.
+    pub fn install(picker: Picker) {
+        let _ = PICKER.set(picker);
+    }
+
+    pub(crate) fn picker() -> Option<&'static Picker> {
+        PICKER.get()
+    }
+}
+
 pub struct FileDialog {
     mode: FileDialogMode,
     options: FileDialogOptions,
@@ -34,6 +59,9 @@ pub struct FileDialog {
     /// A native panel opens once, or after an explicit retry, never each frame.
     native_pending: bool,
     selected_path: Option<PathBuf>,
+    /// Android: the id of the picker request this dialog is waiting for.
+    #[cfg(target_os = "android")]
+    android_request: Option<u64>,
 }
 
 impl FileDialog {
@@ -44,6 +72,8 @@ impl FileDialog {
             error: None,
             native_pending: true,
             selected_path: None,
+            #[cfg(target_os = "android")]
+            android_request: None,
         }
     }
 
@@ -77,18 +107,40 @@ impl FileDialog {
     }
 
     /// Android: the system pickers are asynchronous and live in the Activity, which answers
-    /// through the SAF bridge. Until that bridge is wired, a dialog is cancelled.
+    /// through the shell's SAF bridge. The first call asks for a picker; later calls poll it.
     #[cfg(target_os = "android")]
     pub fn show(&mut self, ctx: &egui::Context) -> Option<FileDialogResult> {
         if self.error.is_some() {
             return self.show_error(ctx);
         }
-        if !self.native_pending {
-            return None;
+        let Some(picker) = android::picker() else {
+            // No shell installed: cancel rather than hang.
+            self.native_pending = false;
+            return Some(FileDialogResult::Cancelled);
+        };
+        let id = match self.android_request {
+            Some(id) => id,
+            None => {
+                let id = (picker.request)(self.mode, &self.options);
+                self.android_request = Some(id);
+                ctx.request_repaint_after(std::time::Duration::from_millis(100));
+                return None;
+            }
+        };
+        match (picker.poll)(id) {
+            Some(result) => {
+                self.android_request = None;
+                let paths = match result {
+                    FileDialogResult::Selected(paths) => Some(paths),
+                    FileDialogResult::Cancelled => None,
+                };
+                Some(self.receive_native_result(paths))
+            }
+            None => {
+                ctx.request_repaint_after(std::time::Duration::from_millis(100));
+                None
+            }
         }
-        self.native_pending = false;
-        ctx.request_repaint();
-        Some(FileDialogResult::Cancelled)
     }
 
     #[cfg(not(target_os = "android"))]

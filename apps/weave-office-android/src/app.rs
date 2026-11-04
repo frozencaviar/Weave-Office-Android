@@ -3,8 +3,10 @@
 
 use std::path::PathBuf;
 
+use eframe::egui;
 use weave_office::app::WeaveApp;
 use winit::platform::android::activity::AndroidApp;
+use winit::platform::android::activity::input::{ImeOptions, InputType, TextInputAction, TextInputState, TextSpan};
 
 /// android-activity looks the entry point up by name, hence no_mangle.
 #[allow(unsafe_code)]
@@ -33,6 +35,22 @@ fn run(android: AndroidApp) -> Result<(), String> {
         std::env::set_var("HOME", &files_dir);
     }
 
+    // The Activity answers the host's document pickers through the file bridge.
+    let bridge = std::sync::Arc::new(
+        crate::bridge::Bridge::new(&files_dir).map_err(|e| format!("couldn't create the file bridge: {e}"))?,
+    );
+    weave_office::file_dialog::android::install(weave_office::file_dialog::android::Picker {
+        request: {
+            let bridge = bridge.clone();
+            Box::new(move |mode, options| bridge.request(mode, options))
+        },
+        poll: {
+            let bridge = bridge.clone();
+            Box::new(move |id| bridge.poll(id))
+        },
+    });
+
+    let shell_android = android.clone();
     let mut options = eframe::NativeOptions {
         renderer: eframe::Renderer::Wgpu,
         // eframe hands it to winit's event loop (with_android_app).
@@ -47,13 +65,93 @@ fn run(android: AndroidApp) -> Result<(), String> {
     eframe::run_native(
         "Weave Office",
         options,
-        Box::new(|cc| {
+        Box::new(move |cc| {
             let mut app = WeaveApp::new(cc, Vec::new());
             app.enable_recovery();
-            Ok(Box::new(app))
+            Ok(Box::new(Shell {
+                app,
+                android: shell_android,
+                ime: String::new(),
+                editing: false,
+            }))
         }),
     )
     .map_err(|e| e.to_string())
+}
+
+/// The shell around the app: the soft keyboard's text, which winit drops on Android.
+struct Shell {
+    app: WeaveApp,
+    android: AndroidApp,
+    /// The keyboard's text as of the last frame.
+    ime: String,
+    /// Whether a text field had focus last frame.
+    editing: bool,
+}
+
+impl Shell {
+    /// Set the keyboard up for a text field and empty its buffer.
+    fn reset_keyboard(&mut self) {
+        self.android.set_ime_editor_info(
+            InputType::TYPE_CLASS_TEXT | InputType::TYPE_TEXT_FLAG_MULTI_LINE,
+            TextInputAction::None,
+            ImeOptions::IME_FLAG_NO_FULLSCREEN,
+        );
+        self.android.set_text_input_state(TextInputState {
+            text: String::new(),
+            selection: TextSpan { start: 0, end: 0 },
+            compose_region: None,
+        });
+        self.ime.clear();
+    }
+
+    /// The on-screen keyboard's text, as egui events (winit drops GameActivity's text events).
+    fn ime_events(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        let editing = ctx.egui_wants_keyboard_input();
+        if editing && !self.editing {
+            self.reset_keyboard();
+        }
+        if !editing && self.editing {
+            // Focus left the field (Enter, a click elsewhere): put the keyboard away, which
+            // winit doesn't, so it stops covering the dialog's buttons.
+            self.android.hide_soft_input(false);
+        }
+        self.editing = editing;
+        if !editing {
+            return;
+        }
+        let now = self.android.text_input_state().text;
+        if now != self.ime {
+            let edit = crate::ime::diff(&self.ime, &now);
+            raw.events.extend(crate::ime::events(&edit));
+            self.ime = now;
+        }
+        // GameActivity's text events don't wake the UI (winit drops them): poll while typing.
+        ctx.request_repaint_after(std::time::Duration::from_millis(50));
+    }
+}
+
+impl eframe::App for Shell {
+    fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {
+        self.app.clear_color(visuals)
+    }
+
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        self.ime_events(ctx, raw);
+        self.app.raw_input_hook(ctx, raw);
+    }
+
+    fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        self.app.logic(ctx, frame);
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        self.app.ui(ui, frame);
+    }
+
+    fn on_exit(&mut self, gl: Option<&eframe::glow::Context>) {
+        self.app.on_exit(gl);
+    }
 }
 
 /// Where the app keeps its data when Android names no files directory (never, in practice).

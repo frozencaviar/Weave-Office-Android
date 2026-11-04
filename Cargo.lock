@@ -8222,6 +8222,8 @@ dependencies = [
  "android_logger",
  "eframe",
  "log",
+ "serde_json",
+ "tempfile",
  "weave-office",
  "winit",
 ]

@@ -13,5 +13,10 @@
 #[cfg(target_os = "android")]
 mod app;
 
+pub mod bridge;
+
+#[cfg(target_os = "android")]
+pub mod ime;
+
 #[cfg(target_os = "android")]
 pub use app::android_main;

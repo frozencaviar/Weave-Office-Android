@@ -1,6 +1,7 @@
 # Android port status
 
-> **Last updated:** 2026-11-04 · **Change:** the dev APK builds and verifies.
+> **Last updated:** 2026-11-04 · **Change:** the SAF and IME bridges landed; the release APK
+> builds.
 
 ## Done
 
@@ -8,26 +9,27 @@
 |---|---|
 | Fork + upstream pin | `f3054c51677cacab7e4ba945d50f7a45b2fd6ae2` (see [UPSTREAM.md](../../UPSTREAM.md)) |
 | Launcher crate | `apps/weave-office-android` (cdylib + rlib): `android_main`, GameActivity, wgpu (Vulkan + GLES), logcat logging, panic hook, `HOME` pointed at the app's private storage |
+| Shell wrapper | `Shell` implements `eframe::App` around `WeaveApp` and injects the soft keyboard's text (winit drops GameActivity's text events) |
 | Gradle project | `apps/weave-office-android/android`: manifest, theme, `WeaveOfficeActivity` (immersive, edge to edge), icon from `assets/app-icon`, debug signing |
 | Build script | `apps/weave-office-android/build.sh` (cargo-ndk + Gradle, font inputs required, `ANDROID_USER_HOME` fallback) |
 | Host compiles for Android | `cargo check -p weave-office --lib --target aarch64-linux-android` — clean |
 | Launcher compiles for Android | `cargo check -p weave-office-android --target aarch64-linux-android` — clean |
 | Desktop-only paths gated | `src/file_dialog.rs` (rfd) and `src/clipboard.rs` (arboard) have Android branches |
 | Vendored dependency stubs | `vendor/rfd` and `vendor/arboard` add the Android backends upstream lacks (dialogs cancelled, clipboard unsupported), patched in `Cargo.toml` |
-| **Dev APK** | `PROFILE=dev apps/weave-office-android/build.sh` → `target/android/weave-office-0.1.1-arm64-v8a.apk` (567 MB, unstripped): package `local.weaveoffice.android`, versionCode 101, minSdk 26, targetSdk 35, `arm64-v8a`, debug-signed, `libweave_office_android.so` inside |
+| **SAF bridge** | `src/bridge.rs` + `WeaveOfficeActivity`: Open/Save through Android's document pickers; picked documents are copied into `bridge/inbox/<id>/`, saves write `bridge/out/<id>/` and the Activity copies them back to the document (polled, once per write) |
+| **IME bridge** | `src/ime.rs` + the Shell wrapper: the keyboard's text state is polled each frame and replayed as egui Text/Backspace events; the keyboard is put away when focus leaves |
+| **Release APK** | `apps/weave-office-android/build.sh` → `target/android/weave-office-0.1.1-arm64-v8a.apk` (236 MB): package `local.weaveoffice.android`, versionCode 101, minSdk 26, targetSdk 35, `arm64-v8a`, debug-signed |
 
 ## Next
 
-1. **Release APK:** `apps/weave-office-android/build.sh` (release profile) — stripped and optimised,
-   much smaller than the dev build.
-2. **Install and run:** `adb install -r`, `adb logcat -s WeaveOffice`; check the window, wgpu
-   adapter and the workspace on a tablet.
-3. **M3 — bridges:** SAF pickers (`SafActivity.java` + `saf_bridge.rs`), IME (hidden
-   `EditText` + `ime_bridge.rs`), clipboard (JNI), replacing the stubs.
-4. **M4 — touch:** Shortcut Pad (from the ArtCraft shells), phone layout, two-finger scroll.
-5. **M5 — system:** printing (Android `PrintManager`), file associations (docx/xlsx/pptx/pdf/md),
-   updates.
-6. **M6 — CI:** a build workflow and a release tag.
+1. **Install and run:** `adb install -r`, `adb logcat -s WeaveOffice`; check the window, the wgpu
+   adapter, opening and saving a document through the pickers, and typing on the soft keyboard.
+2. **M4 — touch:** Shortcut Pad (from the ArtCraft shells), phone layout, two-finger scroll.
+3. **M5 — system:** printing (Android `PrintManager`), file associations (docx/xlsx/pptx/pdf/md),
+   updates, clipboard (JNI).
+4. **M6 — CI:** a build workflow and a release tag.
+5. **Size:** the APK is 236 MB (the four engines and the embedded fonts); a later pass can trim
+   the embedded faces and split the debug symbols.
 
 ## Environment notes
 
