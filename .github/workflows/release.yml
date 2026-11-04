@@ -1,0 +1,49 @@
+name: Release
+
+# A tag `android-v<version>` publishes a release the in-app updater can install: the APK is
+# attached and the tag names the version. `git tag android-v0.1.1 && git push origin android-v0.1.1`.
+#
+# The build is the same workflow a push runs, called here so a release always builds even when the
+# tagged commit only touched documentation.
+on:
+  push:
+    tags: ['android-v*']
+
+permissions:
+  contents: write
+
+# A release is never cancelled by a newer one; it is rare enough to queue.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    uses: ./.github/workflows/android.yml
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: weave-office-android
+          path: apk
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG#android-v}"
+          gh release create "$TAG" apk/*.apk \
+            --repo "${{ github.repository }}" \
+            --title "Weave Office for Android $version" \
+            --notes "Weave Office $version for Android tablets and phones (arm64-v8a, Android 8.0+).
+
+          Download the APK below and sideload it with 'adb install -r', or let the app's own updater install it.
+
+          See the README for what the port adds and how to build it: https://github.com/${{ github.repository }}#readme"

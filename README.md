@@ -102,6 +102,11 @@ The APK lands in `target/android/weave-office-<version>-arm64-v8a.apk`. [docs/an
 has the pinned inputs and the details; [docs/android/STATUS.md](docs/android/STATUS.md) is the
 port's status log.
 
+CI builds the APK when something that can change it changes (the shell, the host, the engines,
+the pinned toolchain), and a newer push to the same branch replaces the build it superseded rather
+than queueing behind it; documentation-only pushes skip the build. GitHub Actions is free for
+public repositories, so the builds cost nothing.
+
 The release key is committed (`apps/weave-office-android/android/weave-release.jks`) on purpose:
 this is a community prototype whose update channel is this repository's own releases, so the key
 only has to keep one build's updates apart from another's — and a key every build shares is what

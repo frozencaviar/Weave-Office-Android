@@ -1,11 +1,30 @@
 name: Android
 
+# A build runs when something that can change the APK changes: the Android shell, the host, the
+# engines, the pinned toolchain or this workflow. Documentation-only pushes skip it. Tags are
+# handled by release.yml, which calls this workflow, so a release always builds.
 on:
   push:
     branches: [main]
-    tags: ['android-v*']
+    paths: &paths
+      - 'apps/weave-office-android/**'
+      - 'crates/**'
+      - 'src/**'
+      - 'vendor/**'
+      - 'scripts/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/android.yml'
   pull_request:
+    paths: *paths
   workflow_dispatch:
+  workflow_call:
+
+# A newer push to the same branch replaces the build it superseded instead of queueing behind it.
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -81,33 +100,3 @@ jobs:
         with:
           name: weave-office-android
           path: target/android/*.apk
-
-  # A tag `android-v<version>` publishes a release the in-app updater can install: the APK is
-  # attached and the tag names the version. `git tag android-v0.1.1 && git push origin android-v0.1.1`.
-  release:
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/android-v')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: weave-office-android
-          path: apk
-
-      - name: Publish the release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          version="${TAG#android-v}"
-          gh release create "$TAG" apk/*.apk \
-            --repo "${{ github.repository }}" \
-            --title "Weave Office for Android $version" \
-            --notes "Weave Office $version for Android tablets and phones (arm64-v8a, Android 8.0+).
-
-          Download the APK below and sideload it with 'adb install -r', or let the app's own updater install it.
-
-          See the README for what the port adds and how to build it: https://github.com/${{ github.repository }}#readme"

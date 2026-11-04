@@ -45,8 +45,11 @@ WeaveOfficeActivity.java (extends GameActivity)      libweave_office_android.so 
 
 ## Releases
 
-`.github/workflows/android.yml` builds the APK on every push and pull request, and publishes a
-release for every `android-v<version>` tag:
+`.github/workflows/android.yml` builds the APK when something that can change it changes (the
+shell, the host, the engines, the pinned toolchain, the workflow itself) and on pull requests;
+documentation-only pushes skip it, and a newer push to the same branch cancels the build it
+superseded. `.github/workflows/release.yml` calls that workflow for every `android-v<version>`
+tag and publishes the release:
 
 ```sh
 git tag android-v0.1.1
