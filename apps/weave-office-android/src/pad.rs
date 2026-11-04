@@ -3,7 +3,7 @@
 //!
 //! The strip can be dragged to either edge (it snaps to the nearer one), folded away with its
 //! arrow (a thin handle stays at the edge), and its keys run host commands (`edit.undo`,
-//! `file.save`) or editor commands (`view.zoomIn`). Double-tapping the arrow opens the pad's
+//! `file.save`) or editor commands (`view.zoomIn`). A long press on the arrow opens the pad's
 //! settings, which are saved in `shortcut-pad.json` in the app's files directory.
 
 use std::path::{Path, PathBuf};
@@ -13,17 +13,19 @@ use serde::{Deserialize, Serialize};
 
 const MIN_KEYS: usize = 2;
 const MAX_KEYS: usize = 10;
-/// How far the wheel must be dragged before it runs one step.
-const WHEEL_STEP: f32 = 18.0;
+/// How far the wheel must be turned before it runs one step (one twelfth of a turn).
+const WHEEL_STEP: f32 = std::f32::consts::TAU / 12.0;
 const KEY_W: f32 = 58.0;
-const KEY_H: f32 = 44.0;
-const WHEEL_H: f32 = 58.0;
+const KEY_H: f32 = 52.0;
+const WHEEL_SIZE: f32 = 64.0;
 const BAR_H: f32 = 26.0;
 const COLLAPSED_W: f32 = 26.0;
 const COLLAPSED_H: f32 = 120.0;
-const PAD_W: f32 = KEY_W + 12.0;
-const MARGIN: f32 = 6.0;
+const PAD_W: f32 = KEY_W + 16.0;
+const MARGIN: f32 = 8.0;
 const EDGE: f32 = 8.0;
+const KEY_GAP: f32 = 6.0;
+const WHEEL_GAP: f32 = 12.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Side {
@@ -75,8 +77,12 @@ pub struct Pad {
     settings_open: bool,
     /// The action a key or the wheel asked for, run on the next frame.
     pending: Option<String>,
-    /// The wheel's drag since it last ran a step.
-    wheel_drag: f32,
+    /// The angle the wheel was last dragged to, while it is being turned.
+    wheel_angle: Option<f32>,
+    /// The angle turned since the wheel last ran a step.
+    wheel_turn: f32,
+    /// When the wheel was pressed, for its long-press enlargement.
+    wheel_held: Option<f64>,
     /// The strip's size as of the last frame, so the next frame can place it against the edge.
     last_size: Option<egui::Vec2>,
     /// How far the strip has been dragged from its edge position.
@@ -95,7 +101,9 @@ impl Pad {
             path,
             settings_open: false,
             pending: None,
-            wheel_drag: 0.0,
+            wheel_angle: None,
+            wheel_turn: 0.0,
+            wheel_held: None,
             last_size: None,
             drag_offset: egui::Vec2::ZERO,
         }
@@ -152,7 +160,12 @@ impl Pad {
     }
 
     fn estimated_height(&self) -> f32 {
-        BAR_H + self.config.keys.len() as f32 * (KEY_H + 4.0) + WHEEL_H + MARGIN * 2.0 + 8.0
+        BAR_H
+            + self.config.keys.len() as f32 * (KEY_H + KEY_GAP)
+            + WHEEL_GAP
+            + WHEEL_SIZE
+            + MARGIN * 2.0
+            + 8.0
     }
 
     fn position(&self, content: egui::Rect, size: egui::Vec2) -> egui::Pos2 {
@@ -168,8 +181,10 @@ impl Pad {
         let (rect, response) = ui.allocate_exact_size(egui::vec2(COLLAPSED_W, COLLAPSED_H), egui::Sense::click_and_drag());
         let visuals = ui.visuals();
         let painter = ui.painter();
-        painter.rect_filled(rect, 10.0, visuals.window_fill);
-        painter.rect_stroke(rect, 10.0, visuals.window_stroke, egui::StrokeKind::Inside);
+        let shadow = egui::epaint::Shadow { offset: [0, 2], blur: 8, spread: 0, color: egui::Color32::from_black_alpha(36) };
+        painter.add(shadow.as_shape(rect, 12.0));
+        painter.rect_filled(rect, 12.0, visuals.window_fill);
+        painter.rect_stroke(rect, 12.0, visuals.window_stroke, egui::StrokeKind::Inside);
         let arrow = match self.config.side {
             Side::Right => "◀",
             Side::Left => "▶",
@@ -195,16 +210,20 @@ impl Pad {
         egui::Frame::new()
             .fill(visuals.window_fill)
             .stroke(visuals.window_stroke)
-            .corner_radius(12.0)
+            .corner_radius(16.0)
             .inner_margin(MARGIN)
+            .shadow(egui::epaint::Shadow { offset: [0, 3], blur: 14, spread: 0, color: egui::Color32::from_black_alpha(40) })
             .show(ui, |ui| {
                 ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
                     self.top_bar(ui, drag_delta, drag_stopped);
+                    ui.add_space(2.0);
                     for key in &self.config.keys {
                         if key_button(ui, key) {
                             self.pending = Some(key.action.clone());
                         }
+                        ui.add_space(KEY_GAP);
                     }
+                    ui.add_space(WHEEL_GAP - KEY_GAP);
                     self.wheel(ui);
                 });
             });
@@ -248,27 +267,68 @@ impl Pad {
         }
     }
 
-    /// The wheel: drag up or down to run its two actions, one step per `WHEEL_STEP`.
+    /// The wheel: a dial with ticks and a hub. Turning it runs its two actions, one step per
+    /// twelfth of a turn; holding it enlarges it.
     fn wheel(&mut self, ui: &mut egui::Ui) {
-        let (rect, response) = ui.allocate_exact_size(egui::vec2(KEY_W, WHEEL_H), egui::Sense::click_and_drag());
+        let (rect, response) = ui.allocate_exact_size(egui::vec2(WHEEL_SIZE, WHEEL_SIZE), egui::Sense::click_and_drag());
+        let held = response.is_pointer_button_down_on();
+        let now = ui.input(|i| i.time);
+        if held {
+            self.wheel_held.get_or_insert(now);
+        } else {
+            self.wheel_held = None;
+        }
+        let long = self.wheel_held.is_some_and(|start| now - start > 0.25);
+        let scale = ui.ctx().animate_value_with_time(egui::Id::new("weave-pad-wheel-scale"), if long { 1.18 } else { 1.0 }, 0.15);
         let center = rect.center();
+        let radius = 30.0 * scale;
         let visuals = ui.visuals();
         let painter = ui.painter();
-        painter.circle_filled(center, 26.0, visuals.widgets.inactive.bg_fill);
-        painter.circle_stroke(center, 26.0, egui::Stroke::new(2.0, visuals.widgets.inactive.fg_stroke.color));
-        painter.text(center, egui::Align2::CENTER_CENTER, "◎", egui::FontId::proportional(22.0), visuals.text_color());
+        // A soft glow while the wheel is held.
+        if scale > 1.02 {
+            painter.circle_filled(center, radius + 7.0, egui::Color32::from_white_alpha(36));
+        }
+        // The dial: a light disc, a ring, twelve ticks and a hub.
+        painter.circle_filled(center, radius, visuals.widgets.inactive.bg_fill);
+        painter.circle_stroke(center, radius, egui::Stroke::new(2.0, visuals.widgets.inactive.bg_stroke.color));
+        for i in 0..12 {
+            let angle = i as f32 * std::f32::consts::TAU / 12.0;
+            let direction = egui::vec2(angle.cos(), angle.sin());
+            painter.line_segment(
+                [center + direction * (radius - 7.0), center + direction * (radius - 3.0)],
+                egui::Stroke::new(1.5, visuals.weak_text_color()),
+            );
+        }
+        painter.circle_filled(center, radius - 10.0, visuals.window_fill);
+        painter.circle_stroke(center, radius - 10.0, egui::Stroke::new(1.0, visuals.widgets.inactive.bg_stroke.color));
+        painter.circle_filled(center, 6.0 * scale, visuals.selection.bg_fill);
+        painter.circle_filled(center, 2.0 * scale, visuals.window_fill);
+        // Turning: the angle from the hub to the pointer, one step per twelfth of a turn.
         if response.dragged() {
-            self.wheel_drag += response.drag_delta().y;
-            while self.wheel_drag <= -WHEEL_STEP {
-                self.wheel_drag += WHEEL_STEP;
-                self.pending = Some(self.config.wheel.up.clone());
-            }
-            while self.wheel_drag >= WHEEL_STEP {
-                self.wheel_drag -= WHEEL_STEP;
-                self.pending = Some(self.config.wheel.down.clone());
+            if let Some(pointer) = response.interact_pointer_pos() {
+                let angle = (pointer.y - center.y).atan2(pointer.x - center.x);
+                if let Some(last) = self.wheel_angle {
+                    let mut delta = angle - last;
+                    while delta > std::f32::consts::PI {
+                        delta -= std::f32::consts::TAU;
+                    }
+                    while delta < -std::f32::consts::PI {
+                        delta += std::f32::consts::TAU;
+                    }
+                    self.wheel_turn += delta;
+                    while self.wheel_turn >= WHEEL_STEP {
+                        self.wheel_turn -= WHEEL_STEP;
+                        self.pending = Some(self.config.wheel.down.clone());
+                    }
+                    while self.wheel_turn <= -WHEEL_STEP {
+                        self.wheel_turn += WHEEL_STEP;
+                        self.pending = Some(self.config.wheel.up.clone());
+                    }
+                }
+                self.wheel_angle = Some(angle);
             }
         } else {
-            self.wheel_drag = 0.0;
+            self.wheel_angle = None;
         }
     }
 
@@ -335,34 +395,45 @@ impl Pad {
     }
 }
 
-/// One key: a light rounded button with the key's colour as a thin bar, growing a little while
-/// it is pressed.
+/// One key: a soft rounded button with an icon, its label and the key's colour as a thin bar,
+/// growing a little while it is pressed.
 fn key_button(ui: &mut egui::Ui, key: &KeyConfig) -> bool {
     let (rect, response) = ui.allocate_exact_size(egui::vec2(KEY_W, KEY_H), egui::Sense::click());
     let pressed = response.is_pointer_button_down_on();
+    let grow = ui.ctx().animate_bool_with_time(ui.id().with(&key.label), pressed, 0.08);
+    let rect = rect.expand(2.0 * grow);
     let visuals = ui.visuals();
-    let fill = if pressed {
-        visuals.widgets.active.bg_fill
-    } else if response.hovered() {
-        visuals.widgets.hovered.bg_fill
-    } else {
-        visuals.widgets.inactive.bg_fill
-    };
-    let rect = if pressed { rect.expand(2.0) } else { rect };
     let painter = ui.painter();
-    painter.rect_filled(rect, 8.0, fill);
-    let accent = egui::Color32::from_rgb(key.color[0], key.color[1], key.color[2]);
-    let bar = egui::Rect::from_min_max(
-        egui::pos2(rect.left() + 10.0, rect.bottom() - 5.0),
-        egui::pos2(rect.right() - 10.0, rect.bottom() - 2.0),
-    );
-    painter.rect_filled(bar, 1.5, accent);
+    let shadow = egui::epaint::Shadow { offset: [0, 2], blur: 6, spread: 0, color: egui::Color32::from_black_alpha(28) };
+    painter.add(shadow.as_shape(rect, 12.0));
+    let fill = if pressed { visuals.widgets.active.bg_fill } else { visuals.widgets.inactive.bg_fill };
+    painter.rect_filled(rect, 12.0, fill);
+    painter.rect_stroke(rect, 12.0, egui::Stroke::new(1.0, visuals.widgets.inactive.bg_stroke.color), egui::StrokeKind::Inside);
+    let icon = match key.action.as_str() {
+        "edit.undo" => "↶",
+        "edit.redo" => "↷",
+        "file.save" => "⤓",
+        _ => "•",
+    };
     painter.text(
-        rect.center() - egui::vec2(0.0, 2.0),
+        rect.center() - egui::vec2(0.0, 7.0),
         egui::Align2::CENTER_CENTER,
-        &key.label,
-        egui::FontId::proportional(13.0),
+        icon,
+        egui::FontId::proportional(20.0),
         visuals.text_color(),
     );
+    painter.text(
+        rect.center() + egui::vec2(0.0, 14.0),
+        egui::Align2::CENTER_CENTER,
+        &key.label,
+        egui::FontId::proportional(10.0),
+        visuals.weak_text_color(),
+    );
+    let accent = egui::Color32::from_rgb(key.color[0], key.color[1], key.color[2]);
+    let bar = egui::Rect::from_min_max(
+        egui::pos2(rect.left() + 12.0, rect.bottom() - 5.0),
+        egui::pos2(rect.right() - 12.0, rect.bottom() - 3.0),
+    );
+    painter.rect_filled(bar, 1.0, accent);
     response.clicked()
 }
