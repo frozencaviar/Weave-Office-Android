@@ -25,6 +25,8 @@
 | **Clipboard** | The Activity publishes the system clipboard to `bridge/clip.txt` (a change listener), the app's copy writes `bridge/clip-set.txt`, and the host's clipboard reads/writes through the shell's hook (`src/clipboard.rs`); in-app rich payloads still work |
 | **Release APK** | `apps/weave-office-android/build.sh` → `target/android/weave-office-0.1.1-arm64-v8a.apk` (236 MB): package `local.weaveoffice.android`, versionCode 101, minSdk 26, targetSdk 35, `arm64-v8a`, debug-signed |
 
+| **CI** | `.github/workflows/android.yml`: Rust 1.95 + Android target, JDK 17, SDK/NDK, cargo-ndk, the pinned font inputs, the host tests and the APK build, uploaded as an artifact |
+
 ## Next
 
 1. **Install and run:** `adb install -r`, `adb logcat -s WeaveOffice`; check the window, the wgpu
