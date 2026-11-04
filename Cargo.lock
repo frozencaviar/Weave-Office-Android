@@ -8279,7 +8279,7 @@ dependencies = [
 
 [[package]]
 name = "weave-office-android"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "android_logger",
  "eframe",

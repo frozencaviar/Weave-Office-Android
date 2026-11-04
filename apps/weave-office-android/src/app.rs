@@ -12,6 +12,15 @@ use winit::platform::android::activity::input::{ImeOptions, InputType, TextInput
 #[allow(unsafe_code)]
 #[unsafe(no_mangle)]
 pub fn android_main(app: AndroidApp) {
+    // android-activity calls this once per Activity creation, and winit's Android backend allows
+    // one event loop per process: a recreated Activity would fail with "EventLoop can't be
+    // recreated" and leave a dead window behind. End the process instead, so the next launch
+    // starts clean.
+    static STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if STARTED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        log::warn!("android_main called again in this process; ending it so the next launch starts clean");
+        std::process::exit(0);
+    }
     android_logger::init_once(
         android_logger::Config::default()
             .with_max_level(log::LevelFilter::Info)
@@ -99,7 +108,12 @@ fn run(android: AndroidApp) -> Result<(), String> {
             }))
         }),
     )
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())?;
+    // The window closed (the title bar's ×): end the process. winit's Android backend allows one
+    // event loop per process, so an Activity left alive behind a closed window would make the next
+    // launch fail with "EventLoop can't be recreated" — the app would never start again.
+    log::info!("the window closed; ending the process so the next launch starts clean");
+    std::process::exit(0);
 }
 
 /// The shell around the app: the soft keyboard's text, which winit drops on Android.

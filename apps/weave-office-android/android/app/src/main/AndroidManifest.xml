@@ -33,7 +33,7 @@
             android:name=".WeaveOfficeActivity"
             android:exported="true"
             android:launchMode="singleTask"
-            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density|locale|layoutDirection|fontScale|colorMode|grammaticalGender"
             android:windowSoftInputMode="adjustResize">
 
             <!-- The Rust library GameActivity loads (libweave_office_android.so). -->
