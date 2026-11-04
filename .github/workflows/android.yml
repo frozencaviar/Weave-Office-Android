@@ -108,6 +108,6 @@ jobs:
             --title "Weave Office for Android $version" \
             --notes "Weave Office $version for Android tablets and phones (arm64-v8a, Android 8.0+).
 
-          Download the APK below and sideload it with `adb install -r`, or let the app's own updater install it.
+          Download the APK below and sideload it with 'adb install -r', or let the app's own updater install it.
 
-          See the [README](https://github.com/${{ github.repository }}#readme) for what the port adds and how to build it."
+          See the README for what the port adds and how to build it: https://github.com/${{ github.repository }}#readme"
