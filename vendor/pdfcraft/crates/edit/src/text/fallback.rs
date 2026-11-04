@@ -335,13 +335,16 @@ fn no_hebrew_font() -> EditError {
 }
 
 /// The faces a Type 3 replacement may draw `text` with, best first. Text with Hebrew takes the
-/// Hebrew face first (its Latin and digits too, so a line keeps one look), then the Japanese faces
-/// and the bundled Latin one for anything it lacks; other text takes the Japanese faces, and the
-/// bundled Latin face behind them, which covers the Latin, Greek and Cyrillic letters they lack
-/// (#2593: the Japanese faces have no қ, ғ, ҳ, ә, ө, ү, ұ or һ).
+/// Hebrew face first (its Latin and digits too, so a line keeps one look), then the other faces for
+/// anything it lacks. Other text takes the Japanese faces, then the bundled Latin face, which covers
+/// the Latin, Greek and Cyrillic letters they lack (#2593: the Japanese faces have no қ, ғ, ҳ, ә, ө,
+/// ү, ұ or һ), then the Simplified Chinese faces for the Simplified forms JIS lacks (组, 线, 门).
 pub(crate) fn type3_faces(text: &str, family: crate::added::Family, bold: bool) -> Result<(Vec<&'static CraftFont>, bool), EditError> {
     let japanese = pdfcraft_fonts::document_japanese_fonts_for_style(family == crate::added::Family::Times, bold);
-    let latin = pdfcraft_fonts::document_latin_fonts(bold);
+    // Simplified Chinese last: text the Japanese or Latin faces draw keeps its look, and text with a
+    // Simplified form the Japanese faces lack (组, U+7EC4) takes the Chinese face.
+    let latin: Vec<&'static CraftFont> =
+        pdfcraft_fonts::document_latin_fonts(bold).into_iter().chain(pdfcraft_fonts::document_chinese_fonts()).collect();
     if !text.chars().any(crate::bidi::is_hebrew) {
         return Ok((japanese.into_iter().chain(latin).collect(), false));
     }

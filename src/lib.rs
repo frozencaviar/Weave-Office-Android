@@ -9,6 +9,7 @@ pub mod font_set;
 pub mod host;
 pub mod icons;
 pub mod language;
+pub mod links;
 pub mod native_file_panel;
 pub mod new_document;
 pub mod office_files;

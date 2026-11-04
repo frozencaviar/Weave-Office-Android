@@ -136,8 +136,8 @@ const COMMANDS: &[Entry] = &[
     ("实际大小", "Actual size", "view.zoomReset", none, Scope::All, ""),
     ("换行符改为 LF", "Line endings: LF", "file.lineEnding", || json!({"value": "lf"}), Scope::All, ""),
     ("换行符改为 CRLF", "Line endings: CRLF", "file.lineEnding", || json!({"value": "crlf"}), Scope::All, ""),
-    ("保存", "Save", "file.save", none, Scope::All, "⌘S"),
-    ("另存为", "Save as", "file.saveAs", none, Scope::All, "⇧⌘S"),
+    ("保存", "Save", "file.save", none, Scope::All, "⌘S / ⇧F12"),
+    ("另存为", "Save as", "file.saveAs", none, Scope::All, "⇧⌘S / F12"),
     ("打印", "Print", "file.print", none, Scope::All, "⌘P"),
     ("导出 PDF", "Export PDF", "file.exportPdf", none, Scope::All, ""),
 ];

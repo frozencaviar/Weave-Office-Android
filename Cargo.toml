@@ -1,6 +1,6 @@
 [package]
 name = "weave-office"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 rust-version = "1.95"
 description = "Unified desktop workspace for documents, spreadsheets, presentations and PDF"
@@ -12,7 +12,7 @@ exclude = ["integration", "vendor/wordcraft", "vendor/gridcraft", "vendor/deckcr
 resolver = "2"
 
 [dependencies]
-eframe = { version = "0.37", default-features = false, features = ["default_fonts", "glow", "clipboard", "links", "accesskit"] }
+eframe = { version = "0.37", default-features = false, features = ["default_fonts", "glow", "clipboard", "links", "accesskit", "wayland", "x11"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 skrifa = "0.44"

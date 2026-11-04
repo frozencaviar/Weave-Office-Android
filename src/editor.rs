@@ -98,6 +98,8 @@ impl Editor {
                 let clip = clipboard.clone();
                 let mut services = gridcraft_ui_egui::Services {
                     paste_text: Some(Box::new(move || clip.text())),
+                    // 点超链接、确认后,由宿主交给系统默认浏览器打开。
+                    open_url: Some(Box::new(crate::links::queue)),
                     ..Default::default()
                 };
                 let clip = clipboard.clone();

@@ -21,9 +21,9 @@ pub mod flag {
     /// Syntax the live preview hides away from the cursor (`**`, `](url)`, `# `).
     pub const MARKUP: u32 = 1 << 6;
     pub const TAG: u32 = 1 << 7;
-    /// Dimmed: front matter, code fences, table rules, done tasks.
+    /// Dimmed: front matter, code fences, done tasks.
     pub const DIM: u32 = 1 << 8;
-    /// Monospace: code blocks, front matter, tables.
+    /// Monospace: code blocks, front matter.
     pub const MONO: u32 = 1 << 9;
     /// Syntax the preview draws over (a list bullet, `>`, `[ ]`): invisible but keeps its width.
     pub const COVERED: u32 = 1 << 10;
@@ -76,6 +76,20 @@ pub struct Line {
     pub code: bool,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct TableRow {
+    pub range: Range<usize>,
+    pub cells: Vec<Range<usize>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Table {
+    pub range: Range<usize>,
+    pub separator: Range<usize>,
+    pub alignments: Vec<egui::Align>,
+    pub rows: Vec<TableRow>,
+}
+
 #[derive(Default)]
 pub struct Parsed {
     pub lines: Vec<Line>,
@@ -86,6 +100,7 @@ pub struct Parsed {
     pub decorations: Vec<Decoration>,
     pub links: Vec<Link>,
     pub headings: Vec<Heading>,
+    pub tables: Vec<Table>,
 }
 
 fn fence(line: &str) -> Option<(&str, usize)> {
@@ -334,31 +349,6 @@ pub fn parse(text: &str) -> Parsed {
             continue;
         }
 
-        // Setext heading underline (`===` / `---` under a paragraph line) is treated as a rule
-        // above; a table is monospace with dimmed rules.
-        let trimmed = rest.trim();
-        if trimmed.starts_with('|')
-            || (trimmed.contains(" | ") && trimmed.matches('|').count() >= 2)
-        {
-            set(&mut parsed, line_start + content..range.end, flag::MONO);
-            if trimmed
-                .chars()
-                .all(|c| matches!(c, '|' | '-' | ':' | ' ' | '\t'))
-            {
-                set(&mut parsed, line_start + content..range.end, flag::DIM);
-            } else {
-                for (i, c) in body[content..].char_indices() {
-                    if c == '|' {
-                        let at = line_start + content + i;
-                        set(&mut parsed, at..at + 1, flag::DIM);
-                    }
-                }
-                inline(text, &mut parsed, line_start + content..range.end);
-            }
-            parsed.lines.push(line);
-            continue;
-        }
-
         // List items and tasks.
         if let Some((marker_end, bullet)) = list_marker(rest) {
             let marker_end = content + marker_end;
@@ -402,7 +392,132 @@ pub fn parse(text: &str) -> Parsed {
         inline(text, &mut parsed, line_start + content..range.end);
         parsed.lines.push(line);
     }
+    parsed.tables = tables(text, &parsed.lines, &parsed.flags);
     parsed
+}
+
+fn table_cells(text: &str, range: Range<usize>) -> Option<Vec<Range<usize>>> {
+    let body = &text[range.clone()];
+    if body.len() - body.trim_start().len() > 3 || body.trim().is_empty() {
+        return None;
+    }
+    let mut boundaries = Vec::new();
+    let mut escaped = false;
+    let mut code_ticks = 0;
+    let mut wiki = false;
+    let mut chars = body.char_indices().peekable();
+    while let Some((offset, ch)) = chars.next() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match ch {
+            '\\' => escaped = true,
+            '`' => {
+                let mut count = 1;
+                while chars.peek().is_some_and(|(_, next)| *next == '`') {
+                    chars.next();
+                    count += 1;
+                }
+                if code_ticks == 0 {
+                    code_ticks = count;
+                } else if code_ticks == count {
+                    code_ticks = 0;
+                }
+            }
+            '[' if code_ticks == 0 && body[offset..].starts_with("[[") => wiki = true,
+            ']' if body[offset..].starts_with("]]") => wiki = false,
+            '|' if code_ticks == 0 && !wiki => boundaries.push(offset),
+            _ => {}
+        }
+    }
+    if boundaries.is_empty() {
+        return None;
+    }
+    let mut start = 0;
+    let mut cells = Vec::new();
+    for end in boundaries.iter().copied().chain(std::iter::once(body.len())) {
+        let cell = &body[start..end];
+        let left = start + cell.len() - cell.trim_start().len();
+        let right = left + cell.trim().len();
+        cells.push(range.start + left..range.start + right);
+        start = end + 1;
+    }
+    if body[..boundaries[0]].trim().is_empty() {
+        cells.remove(0);
+    }
+    if body[boundaries[boundaries.len() - 1] + 1..].trim().is_empty() {
+        cells.pop();
+    }
+    (!cells.is_empty()).then_some(cells)
+}
+
+fn tables(text: &str, lines: &[Line], flags: &[u32]) -> Vec<Table> {
+    let eligible = |line: &Line| {
+        !line.code
+            && line.heading == 0
+            && !flags[line.range.clone()].iter().any(|f| f & flag::QUOTE != 0)
+    };
+    let mut tables = Vec::new();
+    let mut index = 0;
+    while index + 1 < lines.len() {
+        let header = &lines[index];
+        let separator = &lines[index + 1];
+        let candidate = eligible(header)
+            && eligible(separator)
+            && table_cells(text, header.range.clone())
+                .zip(table_cells(text, separator.range.clone()))
+                .is_some_and(|(header, separator)| header.len() == separator.len());
+        if !candidate {
+            index += 1;
+            continue;
+        }
+        let separator_cells = table_cells(text, separator.range.clone()).unwrap();
+        let alignments: Option<Vec<_>> = separator_cells
+            .iter()
+            .map(|range| {
+                let value = &text[range.clone()];
+                let dashes = value.strip_prefix(':').unwrap_or(value);
+                let dashes = dashes.strip_suffix(':').unwrap_or(dashes);
+                (dashes.len() >= 3 && dashes.bytes().all(|byte| byte == b'-')).then(|| {
+                    match (value.starts_with(':'), value.ends_with(':')) {
+                        (true, true) => egui::Align::Center,
+                        (_, true) => egui::Align::RIGHT,
+                        _ => egui::Align::LEFT,
+                    }
+                })
+            })
+            .collect();
+        let Some(alignments) = alignments else {
+            index += 1;
+            continue;
+        };
+        let mut table = Table {
+            range: header.range.start..separator.range.end,
+            separator: separator.range.clone(),
+            alignments,
+            rows: vec![TableRow {
+                range: header.range.clone(),
+                cells: table_cells(text, header.range.clone()).unwrap(),
+            }],
+        };
+        index += 2;
+        while let Some(line) = lines.get(index).filter(|line| eligible(line)) {
+            let Some(mut cells) = table_cells(text, line.range.clone()) else {
+                break;
+            };
+            cells.truncate(table.alignments.len());
+            cells.resize(table.alignments.len(), line.range.end..line.range.end);
+            table.range.end = line.range.end;
+            table.rows.push(TableRow {
+                range: line.range.clone(),
+                cells,
+            });
+            index += 1;
+        }
+        tables.push(table);
+    }
+    tables
 }
 
 /// A heading's text without inline markup, for the outline.
@@ -758,6 +873,46 @@ mod tests {
         assert_eq!(parsed.headings.len(), 1);
         let parsed = parse("```\ncode\nmore");
         assert!(parsed.lines.iter().all(|l| l.code));
+    }
+
+    #[test]
+    fn parses_tables_with_alignment_and_inline_pipes() {
+        let text = "| 项目 | 内容 | 数值 |\r\n| :--- | :---: | ---: |\r\n| 中文 | `a|b` 与 [[note|别名]] 和 a\\|b | **4.46×** |\r\n| 短行 |\r\n\r\nafter";
+        let parsed = parse(text);
+        assert_eq!(parsed.tables.len(), 1);
+        let table = &parsed.tables[0];
+        assert_eq!(
+            table.alignments,
+            [egui::Align::LEFT, egui::Align::Center, egui::Align::RIGHT]
+        );
+        assert_eq!(table.rows.len(), 3);
+        assert_eq!(
+            &text[table.rows[1].cells[1].clone()],
+            "`a|b` 与 [[note|别名]] 和 a\\|b"
+        );
+        assert_eq!(&text[table.rows[2].cells[1].clone()], "");
+        assert_eq!(table.rows[2].cells.len(), 3);
+        assert!(text[table.range.clone()].ends_with("| 短行 |"));
+        assert_eq!(flagged(text, flag::BOLD), "4.46×");
+    }
+
+    #[test]
+    fn tables_require_matching_header_and_separator_outside_code() {
+        for text in [
+            "| just | text |",
+            "| a | b |\n| --- |\n| c | d |",
+            "| a | b |\n| -- | --- |",
+            "| a | b |\n| ::--- | --- |",
+            "```\n| a | b |\n| --- | --- |\n```",
+            "---\n| a | b |\n| --- | --- |\n---\n",
+            "> | a | b |\n> | --- | --- |",
+        ] {
+            assert!(parse(text).tables.is_empty(), "{text}");
+        }
+        let parsed = parse("a | b\n--- | ---\nc | d\n\nx | y\n--- | ---");
+        assert_eq!(parsed.tables.len(), 2);
+        assert_eq!(parsed.tables[0].rows.len(), 2);
+        assert_eq!(parsed.tables[1].rows.len(), 1);
     }
 
     #[test]

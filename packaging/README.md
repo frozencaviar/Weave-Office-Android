@@ -15,8 +15,8 @@ rustup target add aarch64-apple-darwin x86_64-apple-darwin
 cargo fetch --locked --target aarch64-apple-darwin --target x86_64-apple-darwin
 python3 scripts/build-macos-app.py --target aarch64-apple-darwin --output "$WEAVE_DEV_VOLUME/DevCache/WeaveOffice/packages/arm64/Weave Office.app"
 python3 scripts/build-macos-app.py --target x86_64-apple-darwin --output "$WEAVE_DEV_VOLUME/DevCache/WeaveOffice/packages/x64/Weave Office.app"
-python3 scripts/package-macos-dmg.py --app "$WEAVE_DEV_VOLUME/DevCache/WeaveOffice/packages/arm64/Weave Office.app" --output "$WEAVE_DEV_VOLUME/DevCache/WeaveOffice/packages/WeaveOffice-0.1.1-macos-arm64.dmg"
-python3 scripts/package-macos-dmg.py --app "$WEAVE_DEV_VOLUME/DevCache/WeaveOffice/packages/x64/Weave Office.app" --output "$WEAVE_DEV_VOLUME/DevCache/WeaveOffice/packages/WeaveOffice-0.1.1-macos-x64.dmg"
+python3 scripts/package-macos-dmg.py --app "$WEAVE_DEV_VOLUME/DevCache/WeaveOffice/packages/arm64/Weave Office.app" --output "$WEAVE_DEV_VOLUME/DevCache/WeaveOffice/packages/WeaveOffice-0.1.2-macos-arm64.dmg"
+python3 scripts/package-macos-dmg.py --app "$WEAVE_DEV_VOLUME/DevCache/WeaveOffice/packages/x64/Weave Office.app" --output "$WEAVE_DEV_VOLUME/DevCache/WeaveOffice/packages/WeaveOffice-0.1.2-macos-x64.dmg"
 ```
 
 Windows builds run on the local Linux builder through the SSH alias `jamdebian`,

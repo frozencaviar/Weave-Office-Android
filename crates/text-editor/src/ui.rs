@@ -1362,6 +1362,11 @@ fn revealed_lines(app: &TextApp, focused: bool) -> Vec<Range<usize>> {
                 lines.push(block.clone());
             }
         }
+        for table in &parsed.tables {
+            if table.range.start <= range.end && range.start <= table.range.end {
+                lines.push(table.range.clone());
+            }
+        }
     }
     lines
 }
@@ -1421,6 +1426,7 @@ fn editor(app: &mut TextApp, ui: &mut Ui) {
     let focus_text = std::mem::take(&mut app.focus_text);
     let mut clicked_task: Option<usize> = None;
     let mut clicked_link: Option<markdown::Link> = None;
+    let mut rendered_tables = Vec::new();
     scroll.show(ui, |ui| {
         let background = ui.painter().add(Shape::Noop);
         let height = ui.available_height();
@@ -1436,6 +1442,7 @@ fn editor(app: &mut TextApp, ui: &mut Ui) {
                         cache.update(text, kind, language);
                         let mut style = style.clone();
                         style.wrap_width = if wrap { wrap_width } else { f32::INFINITY };
+                        rendered_tables.clear();
                         let job = match (kind, &cache.parsed) {
                             (Kind::Markdown, Some(parsed)) => {
                                 let reveal = match view {
@@ -1443,7 +1450,11 @@ fn editor(app: &mut TextApp, ui: &mut Ui) {
                                     View::Reading => Reveal::None,
                                     View::Live => Reveal::Lines(reveal_lines),
                                 };
-                                layout::markdown_job(text, parsed, reveal, &style)
+                                let mut job = layout::markdown_job(text, parsed, reveal, &style);
+                                rendered_tables = crate::tables::prepare(
+                                    ui, &mut job, parsed, reveal, &style,
+                                );
+                                job
                             }
                             _ => layout::code_job(text, &cache.tokens, &style),
                         };
@@ -1482,12 +1493,26 @@ fn editor(app: &mut TextApp, ui: &mut Ui) {
         let origin = output.galley_pos;
         let clip = ui.clip_rect();
         let cache = &app.cache;
+        let row_top = |at: usize| galley.pos_from_cursor(cache.cursor(at)).top();
         let rect_of = |at: usize| {
-            galley
-                .pos_from_cursor(cache.cursor(at))
+            rendered_tables
+                .iter()
+                .find_map(|table| table.rect_at(at, row_top))
+                .unwrap_or_else(|| galley.pos_from_cursor(cache.cursor(at)))
                 .translate(origin.to_vec2())
         };
         let mut shapes: Vec<Shape> = Vec::new();
+        let mut over: Vec<Shape> = Vec::new();
+        for table in &rendered_tables {
+            for mut shape in table.shapes(row_top, &style) {
+                shape.translate(origin.to_vec2());
+                if matches!(shape, Shape::Text(_)) {
+                    over.push(shape);
+                } else {
+                    shapes.push(shape);
+                }
+            }
+        }
         // The current line (code) and find matches go behind the text.
         if !markdown && output.response.has_focus() {
             let at = app.selection().head;
@@ -1531,7 +1556,6 @@ fn editor(app: &mut TextApp, ui: &mut Ui) {
             }
         }
         // Live-preview decorations.
-        let mut over: Vec<Shape> = Vec::new();
         if markdown
             && view != View::Source
             && let Some(parsed) = &cache.parsed
@@ -1649,8 +1673,26 @@ fn editor(app: &mut TextApp, ui: &mut Ui) {
             if let Some(pointer) = ui.input(|i| i.pointer.hover_pos())
                 && output.response.rect.contains(pointer)
             {
-                let at = galley.cursor_from_pos(pointer - origin);
-                let byte = byte_of_char(&app.text, at.index.0);
+                let table_byte = rendered_tables
+                    .iter()
+                    .find_map(|table| table.byte_at(pointer - origin.to_vec2(), row_top));
+                let byte = table_byte.unwrap_or_else(|| {
+                    let at = galley.cursor_from_pos(pointer - origin);
+                    byte_of_char(&app.text, at.index.0)
+                });
+                if let Some(byte) = table_byte
+                    && !reading
+                    && ui.input(|i| i.pointer.primary_pressed())
+                    && !command
+                {
+                    let mut state = output.state.clone();
+                    state.cursor.set_char_range(Some(egui::text::CCursorRange::one(
+                        cache.cursor(byte),
+                    )));
+                    state.store(&ctx, text_id);
+                    output.response.request_focus();
+                    ctx.request_repaint();
+                }
                 if let Some(link) = parsed
                     .links
                     .iter()
@@ -1873,5 +1915,48 @@ mod tests {
         assert_eq!(cache.char_at(5), 3);
         assert_eq!(cache.char_at(9), 5);
         assert_eq!(cache.char_at(100), 6);
+    }
+
+    #[test]
+    fn clicking_table_content_reveals_its_source_without_changing_text() {
+        let text = "# Report\n\n| Item | Value |\n| --- | --- |\n| Date | 2026-09-20 |\n\nAfter";
+        let mut app = TextApp::from_bytes(Kind::Markdown, "report.md", text.as_bytes()).unwrap();
+        let context = egui::Context::default();
+        let mut pointer = None;
+        for frame in 0..4 {
+            let mut input = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(900.0, 700.0))),
+                focused: true,
+                ..Default::default()
+            };
+            if frame == 2 {
+                let pos = pointer.expect("table value is painted as a separate cell");
+                input.events = vec![
+                    egui::Event::PointerMoved(pos),
+                    egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers: Modifiers::NONE,
+                    },
+                ];
+            }
+            let output = context.run_ui(input, |ui| app.hosted_ui(ui));
+            for shape in &output.shapes {
+                if let Shape::Text(shape) = &shape.shape
+                    && shape.galley.job.text == "2026-09-20"
+                {
+                    pointer = Some(shape.pos + vec2(1.0, shape.galley.size().y * 0.5));
+                }
+            }
+            output.drop_without_applying_deltas();
+            if frame >= 2 {
+                assert_eq!(app.selection().head, text.find("2026").unwrap());
+                let table = &app.cache.parsed.as_ref().unwrap().tables[0];
+                assert!(revealed_lines(&app, true).contains(&table.range));
+            }
+            assert_eq!(app.text(), text);
+            assert!(!app.dirty());
+        }
     }
 }

@@ -46,7 +46,7 @@ fn draw_toolbar(
             ui,
             &mut commands,
             "另存为",
-            "⇧⌘S",
+            "⇧⌘S / F12",
             "file.save_as",
             has_document,
         );
@@ -60,8 +60,15 @@ fn draw_toolbar(
         );
         menu_item(ui, &mut commands, "打印", "⌘P", "file.print", has_document);
         ui.separator();
-        menu_item(ui, &mut commands, "关闭", "⌘W", "file.close", has_document);
-        menu_item(ui, &mut commands, "设置", "", "file.options", true);
+        menu_item(
+            ui,
+            &mut commands,
+            "关闭",
+            "⌘W / ⌘F4",
+            "file.close",
+            has_document,
+        );
+        menu_item(ui, &mut commands, "设置", "⌘,", "file.options", true);
         menu_item(ui, &mut commands, "关于", "", "app.about", true);
         ui.separator();
         menu_item(ui, &mut commands, "退出", "⌘Q", "app.quit", true);

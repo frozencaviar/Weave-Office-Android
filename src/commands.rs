@@ -67,6 +67,8 @@ pub enum HostRequest {
     FullScreen(Option<bool>),
     /// A request to leave an application surface, not to close a document.
     Dismiss,
+    /// Open a web or email address in the system's default browser or mail app.
+    OpenUrl(String),
     Unsupported {
         id: String,
         params: Value,
@@ -201,6 +203,7 @@ fn classify_known(id: &str, params: &Value) -> Option<HostRequest> {
         )?),
         "app.language.english" => R::InterfaceLanguage(UiLanguage::En),
         "app.about" | "help.about" => R::About,
+        "system.open_url" => R::OpenUrl(params.get("url")?.as_str()?.to_owned()),
         "view.next_tab" => R::NextTab,
         "view.previous_tab" => R::PreviousTab,
         "view.theme.light" => R::Theme(ThemeRequest::Light),
@@ -378,6 +381,18 @@ fn parse_scale(value: &Value) -> Option<ScaleRequest> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn open_url_requests_carry_their_address() {
+        assert_eq!(
+            classify("system.open_url", &json!({"url":"https://example.com"})),
+            HostRequest::OpenUrl("https://example.com".into())
+        );
+        assert!(matches!(
+            classify("system.open_url", &json!({})),
+            HostRequest::Unsupported { .. }
+        ));
+    }
 
     #[test]
     fn shared_language_requests_preserve_panes_and_reject_unsupported_languages() {

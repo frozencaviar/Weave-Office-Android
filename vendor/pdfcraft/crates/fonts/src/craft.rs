@@ -152,6 +152,14 @@ pub fn document_japanese_fonts_for_style(serif: bool, bold: bool) -> Vec<&'stati
     document_faces(CRAFT_FONTS, serif, bold)
 }
 
+/// The Simplified Chinese faces that can stand in for document text, in manifest order: the `Hans`
+/// faces that are not also Japanese ones (those are in [`document_japanese_fonts_for_style`]).
+/// The Japanese faces follow JIS and lack many Simplified forms (组, 线, 门 …), so text written in
+/// Simplified Chinese needs these. Empty without craft-fonts or without a `Hans` face.
+pub fn document_chinese_fonts() -> Vec<&'static CraftFont> {
+    CRAFT_FONTS.iter().filter(|f| f.covers("Hans") && !f.covers("Jpan")).collect()
+}
+
 /// The scripts the bundled Inter faces are for.
 static LATIN_SCRIPTS: &[&str] = &["Latn", "Cyrl", "Grek"];
 

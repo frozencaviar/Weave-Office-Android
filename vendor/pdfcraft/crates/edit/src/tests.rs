@@ -2031,7 +2031,8 @@ fn japanese_replacement_missing_a_glyph_after_240_changes_nothing() {
         return;
     }
     // The first CJK character that no face draws: the 242nd unique character, in a second font.
-    let faces = pdfcraft_fonts::document_japanese_fonts_for_style(false, false);
+    let mut faces = pdfcraft_fonts::document_japanese_fonts_for_style(false, false);
+    faces.extend(pdfcraft_fonts::document_chinese_fonts());
     let missing = (0x4E00u32..0x9FFF)
         .filter_map(char::from_u32)
         .find(|ch| faces.iter().all(|face| pdfcraft_fonts::japanese_glyph_from(face, *ch).is_err()))
@@ -2044,6 +2045,22 @@ fn japanese_replacement_missing_a_glyph_after_240_changes_nothing() {
     assert!(err.contains(&format!("U+{:04X}", missing as u32)), "{err}");
     assert_eq!(write_incremental(&doc, &SaveOptions::default()).unwrap(), saved);
     assert_eq!(write_incremental(&snapshot, &SaveOptions::default()).unwrap(), saved);
+}
+
+/// Simplified Chinese text the Japanese faces can't draw (组 U+7EC4, 线 U+7EBF are not in JIS) is
+/// written with the Simplified Chinese face rather than refused.
+#[test]
+fn simplified_chinese_replacement_uses_the_chinese_face() {
+    if without_craft_fonts("simplified_chinese_replacement_uses_the_chinese_face") || pdfcraft_fonts::document_chinese_fonts().is_empty() {
+        return;
+    }
+    let japanese = pdfcraft_fonts::document_japanese_fonts_for_style(false, false);
+    assert!(japanese.iter().all(|face| pdfcraft_fonts::japanese_glyph_from(face, '组').is_err()), "组 needs the Chinese face");
+    for replacement in ["项目组", "组织线路 Group 1"] {
+        let mut doc = text_page("BT /F2 12 Tf 72 700 Td (ab) Tj ET");
+        text::replace_line(&mut doc, 0, 0, replacement).unwrap();
+        assert_eq!(text::text_lines(&doc, 0).unwrap().iter().map(|l| l.text.as_str()).collect::<String>(), replacement);
+    }
 }
 
 /// Runs that change font move nothing: with two glyphs per font the text reads back the same, in the

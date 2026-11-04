@@ -14,6 +14,7 @@ pub mod markdown;
 pub mod palette;
 pub mod sidebar;
 pub mod syntax;
+mod tables;
 pub mod tools;
 mod ui;
 
