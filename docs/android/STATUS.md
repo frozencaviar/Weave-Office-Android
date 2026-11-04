@@ -28,6 +28,21 @@
 
 | **CI** | `.github/workflows/android.yml`: Rust 1.95 + Android target, JDK 17, SDK/NDK, cargo-ndk, the pinned font inputs, the host tests and the APK build, uploaded as an artifact |
 
+## Validated on the Android emulator
+
+The APK was installed and run on an Android 15 (API 35) arm64 emulator (SwiftShader):
+
+- the app starts, the Home screen draws all seven document types, and the Shortcut Pad is on
+  the right edge (see [home.png](images/home.png));
+- a presentation opens with its ribbon, slide panel, canvas and status bar
+  ([presentation.png](images/presentation.png));
+- the soft keyboard opens when a text box is tapped;
+- wgpu picks Vulkan (SwiftShader) with the GL fallback available; the logcat says which adapter
+  it got.
+
+Known issue: the Shortcut Pad's position and input need fixing — it draws inside the app's
+content area rather than at the window's edge, and taps in its strip reach the canvas.
+
 ## Next
 
 1. **Install and run:** `adb install -r`, `adb logcat -s WeaveOffice`; check the window, the wgpu
