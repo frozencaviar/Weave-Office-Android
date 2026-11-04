@@ -5,6 +5,9 @@
 //! arrow (a thin handle stays at the edge), and its keys run host commands (`edit.undo`,
 //! `file.save`) or editor commands (`view.zoomIn`). A long press on the arrow opens the pad's
 //! settings, which are saved in `shortcut-pad.json` in the app's files directory.
+//!
+//! The keys are compact 36 pt squares, 6 pt apart in 8 pt of padding, with Lucide-style 18 pt
+//! line icons (1.75 pt stroke, round caps) and their names in a tooltip on hover.
 
 use std::path::{Path, PathBuf};
 
@@ -15,18 +18,23 @@ const MIN_KEYS: usize = 2;
 const MAX_KEYS: usize = 10;
 /// How far the wheel must be turned before it runs one step (one twelfth of a turn).
 const WHEEL_STEP: f32 = std::f32::consts::TAU / 12.0;
-const KEY_W: f32 = 48.0;
-const KEY_H: f32 = 56.0;
-const KEY_RADIUS: f32 = 20.0;
-const WHEEL_SIZE: f32 = 56.0;
-const BAR_H: f32 = 26.0;
-const COLLAPSED_W: f32 = 26.0;
-const COLLAPSED_H: f32 = 120.0;
-const PAD_W: f32 = KEY_W + 16.0;
-const MARGIN: f32 = 8.0;
-const EDGE: f32 = 8.0;
+
+/// The keys: compact 36 pt squares, 6 pt apart, inside 8 pt of padding.
+const KEY: f32 = 36.0;
+const KEY_RADIUS: f32 = 9.0;
 const KEY_GAP: f32 = 6.0;
-const WHEEL_GAP: f32 = 12.0;
+const PAD_PAD: f32 = 8.0;
+const PAD_W: f32 = KEY + PAD_PAD * 2.0;
+/// Icons: 18 pt, drawn in a 24 pt design space with Lucide's 1.75 pt stroke.
+const ICON: f32 = 18.0;
+const ICON_STROKE: f32 = 1.75 * ICON / 24.0;
+const ICON_COLOR: egui::Color32 = egui::Color32::from_rgb(0x4B, 0x55, 0x63);
+const WHEEL_SIZE: f32 = 36.0;
+const BAR_H: f32 = 20.0;
+const COLLAPSED_W: f32 = 20.0;
+const COLLAPSED_H: f32 = 88.0;
+const EDGE: f32 = 8.0;
+const WHEEL_GAP: f32 = 10.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Side {
@@ -161,12 +169,14 @@ impl Pad {
     }
 
     fn estimated_height(&self) -> f32 {
+        let count = self.config.keys.len() as f32;
         BAR_H
-            + self.config.keys.len() as f32 * (KEY_H + KEY_GAP)
+            + 4.0
+            + count * KEY
+            + (count - 1.0).max(0.0) * KEY_GAP
             + WHEEL_GAP
             + WHEEL_SIZE
-            + MARGIN * 2.0
-            + 8.0
+            + PAD_PAD * 2.0
     }
 
     fn position(&self, content: egui::Rect, size: egui::Vec2) -> egui::Pos2 {
@@ -180,17 +190,32 @@ impl Pad {
     /// The folded strip: a thin handle with an arrow that unfolds it.
     fn collapsed_handle(&mut self, ui: &mut egui::Ui, drag_delta: &mut egui::Vec2, drag_stopped: &mut bool) {
         let (rect, response) = ui.allocate_exact_size(egui::vec2(COLLAPSED_W, COLLAPSED_H), egui::Sense::click_and_drag());
-        let visuals = ui.visuals();
+        let visuals = ui.visuals().clone();
         let painter = ui.painter();
-        let shadow = egui::epaint::Shadow { offset: [0, 2], blur: 8, spread: 0, color: egui::Color32::from_black_alpha(36) };
-        painter.add(shadow.as_shape(rect, 12.0));
-        painter.rect_filled(rect, 12.0, visuals.window_fill);
-        painter.rect_stroke(rect, 12.0, visuals.window_stroke, egui::StrokeKind::Inside);
-        let arrow = match self.config.side {
-            Side::Right => "◀",
-            Side::Left => "▶",
+        painter.add(
+            egui::epaint::Shadow {
+                offset: [0, 2],
+                blur: 8,
+                spread: 0,
+                color: egui::Color32::from_black_alpha(24),
+            }
+            .as_shape(rect, 10.0),
+        );
+        painter.rect_filled(rect, 10.0, visuals.window_fill);
+        // The arrow points away from the edge, the way the strip unfolds.
+        let direction = match self.config.side {
+            Side::Right => -1.0,
+            Side::Left => 1.0,
         };
-        painter.text(rect.center(), egui::Align2::CENTER_CENTER, arrow, egui::FontId::proportional(14.0), visuals.text_color());
+        let center = rect.center();
+        painter.add(egui::Shape::line(
+            vec![
+                egui::pos2(center.x - direction * 2.0, center.y - 4.0),
+                egui::pos2(center.x + direction * 2.0, center.y),
+                egui::pos2(center.x - direction * 2.0, center.y + 4.0),
+            ],
+            egui::Stroke::new(1.4, visuals.weak_text_color()),
+        ));
         if response.clicked() {
             self.config.collapsed = false;
             self.save();
@@ -210,21 +235,29 @@ impl Pad {
         let visuals = ui.visuals().clone();
         egui::Frame::new()
             .fill(visuals.window_fill)
-            .stroke(visuals.window_stroke)
-            .corner_radius(16.0)
-            .inner_margin(MARGIN)
-            .shadow(egui::epaint::Shadow { offset: [0, 3], blur: 14, spread: 0, color: egui::Color32::from_black_alpha(40) })
+            .corner_radius(14.0)
+            .inner_margin(PAD_PAD)
+            .shadow(egui::epaint::Shadow {
+                offset: [0, 2],
+                blur: 10,
+                spread: 0,
+                color: egui::Color32::from_black_alpha(24),
+            })
             .show(ui, |ui| {
                 ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                    // The gaps below are exact: egui's own item spacing would add to them.
+                    ui.spacing_mut().item_spacing.y = 0.0;
                     self.top_bar(ui, drag_delta, drag_stopped);
-                    ui.add_space(2.0);
-                    for key in &self.config.keys {
+                    ui.add_space(4.0);
+                    for (index, key) in self.config.keys.iter().enumerate() {
+                        if index > 0 {
+                            ui.add_space(KEY_GAP);
+                        }
                         if key_button(ui, key) {
                             self.pending = Some(key.action.clone());
                         }
-                        ui.add_space(KEY_GAP);
                     }
-                    ui.add_space(WHEEL_GAP - KEY_GAP);
+                    ui.add_space(WHEEL_GAP);
                     self.wheel(ui);
                 });
             });
@@ -232,27 +265,37 @@ impl Pad {
 
     /// The strip's top bar: the fold arrow and a drag grip.
     fn top_bar(&mut self, ui: &mut egui::Ui, drag_delta: &mut egui::Vec2, drag_stopped: &mut bool) {
-        let (rect, response) = ui.allocate_exact_size(egui::vec2(KEY_W, BAR_H), egui::Sense::click_and_drag());
-        let visuals = ui.visuals();
+        let (rect, response) = ui.allocate_exact_size(egui::vec2(KEY, BAR_H), egui::Sense::click_and_drag());
+        let visuals = ui.visuals().clone();
         let painter = ui.painter();
-        let arrow = match self.config.side {
-            Side::Right => "▶",
-            Side::Left => "◀",
+        let weak = visuals.weak_text_color();
+        let direction = match self.config.side {
+            Side::Right => 1.0,
+            Side::Left => -1.0,
         };
-        painter.text(
-            egui::pos2(rect.left() + 10.0, rect.center().y),
-            egui::Align2::LEFT_CENTER,
-            arrow,
-            egui::FontId::proportional(12.0),
-            visuals.weak_text_color(),
-        );
-        painter.text(
-            egui::pos2(rect.right() - 10.0, rect.center().y),
-            egui::Align2::RIGHT_CENTER,
-            "⋮⋮",
-            egui::FontId::proportional(12.0),
-            visuals.weak_text_color(),
-        );
+        // The fold arrow, pointing at the edge the strip folds into.
+        let center = egui::pos2(rect.left() + 9.0, rect.center().y);
+        painter.add(egui::Shape::line(
+            vec![
+                egui::pos2(center.x - direction * 1.5, center.y - 3.5),
+                egui::pos2(center.x + direction * 2.0, center.y),
+                egui::pos2(center.x - direction * 1.5, center.y + 3.5),
+            ],
+            egui::Stroke::new(1.4, weak),
+        ));
+        // The grip: two columns of three dots.
+        for row in 0..3 {
+            for column in 0..2 {
+                painter.circle_filled(
+                    egui::pos2(
+                        rect.right() - 12.0 + column as f32 * 3.5,
+                        center.y - 4.0 + row as f32 * 4.0,
+                    ),
+                    0.9,
+                    weak,
+                );
+            }
+        }
         if response.clicked() {
             self.config.collapsed = true;
             self.save();
@@ -273,6 +316,10 @@ impl Pad {
     fn wheel(&mut self, ui: &mut egui::Ui) {
         let (rect, response) = ui.allocate_exact_size(egui::vec2(WHEEL_SIZE, WHEEL_SIZE), egui::Sense::click_and_drag());
         let held = response.is_pointer_button_down_on();
+        if held {
+            // Keep frames coming while the wheel is held, so its enlargement can animate.
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
+        }
         let now = ui.input(|i| i.time);
         if held {
             self.wheel_held.get_or_insert(now);
@@ -282,28 +329,28 @@ impl Pad {
         let long = self.wheel_held.is_some_and(|start| now - start > 0.25);
         let scale = ui.ctx().animate_value_with_time(egui::Id::new("weave-pad-wheel-scale"), if long { 1.18 } else { 1.0 }, 0.15);
         let center = rect.center();
-        let radius = 30.0 * scale;
-        let visuals = ui.visuals();
+        let radius = 17.0 * scale;
+        let visuals = ui.visuals().clone();
         let painter = ui.painter();
         // A soft glow while the wheel is held.
         if scale > 1.02 {
-            painter.circle_filled(center, radius + 7.0, egui::Color32::from_white_alpha(36));
+            painter.circle_filled(center, radius + 6.0, egui::Color32::from_rgba_unmultiplied(59, 130, 246, 26));
         }
-        // The dial: a light disc, a ring, twelve ticks and a hub.
+        // The dial: a light disc, a hairline ring, twelve ticks and a hub.
         painter.circle_filled(center, radius, visuals.widgets.inactive.bg_fill);
-        painter.circle_stroke(center, radius, egui::Stroke::new(2.0, visuals.widgets.inactive.bg_stroke.color));
+        painter.circle_stroke(center, radius, egui::Stroke::new(1.0, visuals.widgets.inactive.bg_stroke.color));
         for i in 0..12 {
             let angle = i as f32 * std::f32::consts::TAU / 12.0;
             let direction = egui::vec2(angle.cos(), angle.sin());
             painter.line_segment(
-                [center + direction * (radius - 7.0), center + direction * (radius - 3.0)],
-                egui::Stroke::new(1.5, visuals.weak_text_color()),
+                [center + direction * (radius - 5.0), center + direction * (radius - 2.0)],
+                egui::Stroke::new(1.0, visuals.weak_text_color()),
             );
         }
-        painter.circle_filled(center, radius - 10.0, visuals.window_fill);
-        painter.circle_stroke(center, radius - 10.0, egui::Stroke::new(1.0, visuals.widgets.inactive.bg_stroke.color));
-        painter.circle_filled(center, 6.0 * scale, visuals.selection.bg_fill);
-        painter.circle_filled(center, 2.0 * scale, visuals.window_fill);
+        painter.circle_filled(center, radius - 7.0, visuals.window_fill);
+        painter.circle_stroke(center, radius - 7.0, egui::Stroke::new(1.0, visuals.widgets.inactive.bg_stroke.color));
+        painter.circle_filled(center, 4.0 * scale, visuals.selection.bg_fill);
+        painter.circle_filled(center, 1.5 * scale, visuals.window_fill);
         // Turning: the angle from the hub to the pointer, one step per twelfth of a turn.
         if response.dragged() {
             if let Some(pointer) = response.interact_pointer_pos() {
@@ -396,36 +443,198 @@ impl Pad {
     }
 }
 
-/// One key: a round button with an icon, its label underneath, growing a little while it is
-/// pressed.
+/// One key: a compact square that only shows a fill while it is hovered or pressed, with a
+/// Lucide-style line icon and its name in a tooltip to the right.
 fn key_button(ui: &mut egui::Ui, key: &KeyConfig) -> bool {
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(KEY_W, KEY_H), egui::Sense::click());
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(KEY, KEY), egui::Sense::click());
     let pressed = response.is_pointer_button_down_on();
-    let grow = ui.ctx().animate_bool_with_time(ui.id().with(&key.label), pressed, 0.08);
-    let visuals = ui.visuals();
+    let hovered = response.hovered();
+    if pressed {
+        // Keep frames coming while the key is held, so the long-press tooltip can appear.
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
+    }
+    // A long press shows the name too, so the pad stays usable without a mouse.
+    let now = ui.input(|i| i.time);
+    let hold_id = ui.id().with(("weave-pad-hold", &key.label));
+    let held_since = ui.ctx().memory_mut(|memory| {
+        let start = memory.data.get_temp_mut_or_insert_with(hold_id, || now);
+        if !pressed {
+            *start = now;
+        }
+        *start
+    });
+    let long = pressed && now - held_since > 0.45;
+    let visuals = ui.visuals().clone();
+    let fill = key_fill(&visuals, hovered, pressed);
     let painter = ui.painter();
-    let radius = KEY_RADIUS * (1.0 + 0.08 * grow);
-    let center = egui::pos2(rect.center().x, rect.top() + KEY_RADIUS);
-    let circle = egui::Rect::from_center_size(center, egui::Vec2::splat(radius * 2.0));
-    let shadow = egui::epaint::Shadow { offset: [0, 2], blur: 8, spread: 0, color: egui::Color32::from_black_alpha(30) };
-    painter.add(shadow.as_shape(circle, radius));
-    let fill = if pressed { visuals.widgets.active.bg_fill } else { visuals.widgets.inactive.bg_fill };
-    painter.circle_filled(center, radius, fill);
-    painter.circle_stroke(center, radius, egui::Stroke::new(1.0, visuals.widgets.inactive.bg_stroke.color));
-    let icon = match key.action.as_str() {
-        "edit.undo" => weave_office::icons::Icon::Undo,
-        "edit.redo" => weave_office::icons::Icon::Redo,
-        "file.save" => weave_office::icons::Icon::Save,
-        _ => weave_office::icons::Icon::More,
+    if fill != egui::Color32::TRANSPARENT {
+        painter.rect_filled(rect, KEY_RADIUS, fill);
+    }
+    let color = if pressed || hovered {
+        icon_color(&visuals).gamma_multiply(0.72)
+    } else {
+        icon_color(&visuals)
     };
-    let icon_rect = egui::Rect::from_center_size(center, egui::Vec2::splat(20.0));
-    weave_office::icons::paint(painter, icon_rect, icon, visuals.text_color());
-    painter.text(
-        egui::pos2(rect.center().x, rect.bottom() - 6.0),
-        egui::Align2::CENTER_CENTER,
-        &key.label,
-        egui::FontId::proportional(10.0),
-        visuals.weak_text_color(),
+    paint_icon(
+        painter,
+        egui::Rect::from_center_size(rect.center(), egui::Vec2::splat(ICON)),
+        &key.action,
+        color,
     );
+    let tip = ui.ctx().animate_bool_with_time(ui.id().with(("weave-pad-tip", &key.label)), hovered || long, 0.12);
+    if tip > 0.01 {
+        paint_tooltip(ui, rect, &key.label, tip);
+    }
     response.clicked()
+}
+
+/// The key's fill: nothing at rest, a light grey on hover, a darker one while pressed.
+fn key_fill(visuals: &egui::Visuals, hovered: bool, pressed: bool) -> egui::Color32 {
+    if pressed {
+        if visuals.dark_mode {
+            egui::Color32::from_rgb(0x37, 0x41, 0x51)
+        } else {
+            egui::Color32::from_rgb(0xE5, 0xE7, 0xEB)
+        }
+    } else if hovered {
+        if visuals.dark_mode {
+            egui::Color32::from_rgb(0x2B, 0x33, 0x40)
+        } else {
+            egui::Color32::from_rgb(0xF3, 0xF4, 0xF6)
+        }
+    } else {
+        egui::Color32::TRANSPARENT
+    }
+}
+
+/// The icon colour: the spec's #4B5563 in the light theme, a light grey in the dark one.
+fn icon_color(visuals: &egui::Visuals) -> egui::Color32 {
+    if visuals.dark_mode {
+        egui::Color32::from_rgb(0xD1, 0xD5, 0xDB)
+    } else {
+        ICON_COLOR
+    }
+}
+
+/// The key's name, in a light tooltip beside it (on the left when the strip is at the right edge).
+fn paint_tooltip(ui: &egui::Ui, key: egui::Rect, label: &str, t: f32) {
+    let visuals = ui.visuals();
+    let dark = visuals.dark_mode;
+    let text_color = if dark {
+        egui::Color32::from_rgb(0xE5, 0xE7, 0xEB)
+    } else {
+        egui::Color32::from_rgb(0x37, 0x41, 0x51)
+    };
+    let galley = ui.painter().layout_no_wrap(
+        label.to_owned(),
+        egui::FontId::proportional(11.0),
+        text_color.gamma_multiply(t),
+    );
+    let padding = egui::vec2(8.0, 5.0);
+    let size = galley.size() + padding * 2.0;
+    let content = ui.ctx().content_rect();
+    let mut x = key.right() + 8.0;
+    if x + size.x > content.right() - 4.0 {
+        x = key.left() - 8.0 - size.x;
+    }
+    let rect = egui::Rect::from_min_size(egui::pos2(x, key.center().y - size.y / 2.0), size);
+    let background = if dark {
+        egui::Color32::from_rgb(0x1F, 0x29, 0x37)
+    } else {
+        egui::Color32::WHITE
+    };
+    let border = if dark {
+        egui::Color32::from_rgb(0x37, 0x41, 0x51)
+    } else {
+        egui::Color32::from_rgb(0xE5, 0xE7, 0xEB)
+    };
+    let painter = ui.painter();
+    painter.add(
+        egui::epaint::Shadow {
+            offset: [0, 2],
+            blur: 6,
+            spread: 0,
+            color: egui::Color32::from_black_alpha((28.0 * t) as u8),
+        }
+        .as_shape(rect, 6.0),
+    );
+    painter.rect_filled(rect, 6.0, background.gamma_multiply(t));
+    painter.rect_stroke(rect, 6.0, egui::Stroke::new(1.0, border.gamma_multiply(t)), egui::StrokeKind::Inside);
+    painter.galley(rect.min + padding, galley, text_color.gamma_multiply(t));
+}
+
+/// A Lucide-style glyph: geometry in a 24 × 24 design space, stroked with round caps and joins.
+struct Glyph<'a> {
+    painter: &'a egui::Painter,
+    rect: egui::Rect,
+    stroke: egui::Stroke,
+}
+
+impl Glyph<'_> {
+    fn p(&self, x: f32, y: f32) -> egui::Pos2 {
+        egui::pos2(
+            self.rect.min.x + x * self.rect.width() / 24.0,
+            self.rect.min.y + y * self.rect.height() / 24.0,
+        )
+    }
+
+    /// Stroke a polyline, rounding its caps and joins with small discs.
+    fn path(&self, points: &[(f32, f32)]) {
+        let points: Vec<egui::Pos2> = points.iter().map(|&(x, y)| self.p(x, y)).collect();
+        self.painter.add(egui::Shape::line(points.clone(), self.stroke));
+        let radius = self.stroke.width / 2.0;
+        for point in points {
+            self.painter.circle_filled(point, radius, self.stroke.color);
+        }
+    }
+
+    /// Points along a circular arc, in the design space.
+    fn arc(&self, cx: f32, cy: f32, radius: f32, from: f32, to: f32) -> Vec<(f32, f32)> {
+        let steps = 12;
+        (0..=steps)
+            .map(|i| {
+                let angle = from + (to - from) * i as f32 / steps as f32;
+                (cx + radius * angle.cos(), cy + radius * angle.sin())
+            })
+            .collect()
+    }
+}
+
+/// Paint a key's icon: Lucide's undo-2, redo-2 and save, in an 18 pt box.
+fn paint_icon(painter: &egui::Painter, rect: egui::Rect, action: &str, color: egui::Color32) {
+    let glyph = Glyph { painter, rect, stroke: egui::Stroke::new(ICON_STROKE, color) };
+    match action {
+        "edit.undo" => {
+            glyph.path(&[(9.0, 14.0), (4.0, 9.0), (9.0, 4.0)]);
+            let mut curve = vec![(4.0, 9.0), (14.5, 9.0)];
+            curve.extend(glyph.arc(14.5, 14.5, 5.5, -std::f32::consts::FRAC_PI_2, std::f32::consts::FRAC_PI_2));
+            curve.push((11.0, 20.0));
+            glyph.path(&curve);
+        }
+        "edit.redo" => {
+            glyph.path(&[(15.0, 14.0), (20.0, 9.0), (15.0, 4.0)]);
+            let mut curve = vec![(20.0, 9.0), (9.5, 9.0)];
+            curve.extend(glyph.arc(9.5, 14.5, 5.5, -std::f32::consts::FRAC_PI_2, -3.0 * std::f32::consts::FRAC_PI_2));
+            curve.push((13.0, 20.0));
+            glyph.path(&curve);
+        }
+        "file.save" => {
+            glyph.path(&[
+                (5.0, 3.0),
+                (15.2, 3.0),
+                (21.0, 8.8),
+                (21.0, 19.0),
+                (19.0, 21.0),
+                (5.0, 21.0),
+                (3.0, 19.0),
+                (3.0, 5.0),
+                (5.0, 3.0),
+            ]);
+            glyph.path(&[(17.0, 21.0), (17.0, 14.0), (16.0, 13.0), (8.0, 13.0), (7.0, 14.0), (7.0, 21.0)]);
+            glyph.path(&[(7.0, 3.0), (7.0, 7.0), (8.0, 8.0), (15.0, 8.0)]);
+        }
+        _ => {
+            painter.circle_filled(rect.center(), 2.0, color);
+        }
+    }
 }

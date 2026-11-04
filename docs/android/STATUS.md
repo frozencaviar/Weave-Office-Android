@@ -1,7 +1,7 @@
 # Android port status
 
-> **Last updated:** 2026-11-04 · **Change:** the SAF and IME bridges landed; the release APK
-> builds.
+> **Last updated:** 2026-11-04 · **Change:** the Shortcut Pad's keys were redrawn as compact
+> squares with Lucide-style line icons and hover tooltips.
 
 ## Done
 
@@ -18,13 +18,13 @@
 | Vendored dependency stubs | `vendor/rfd` and `vendor/arboard` add the Android backends upstream lacks (dialogs cancelled, clipboard unsupported), patched in `Cargo.toml` |
 | **SAF bridge** | `src/bridge.rs` + `WeaveOfficeActivity`: Open/Save through Android's document pickers; picked documents are copied into `bridge/inbox/<id>/`, saves write `bridge/out/<id>/` and the Activity copies them back to the document (polled, once per write) |
 | **IME bridge** | `src/ime.rs` + the Shell wrapper: the keyboard's text state is polled each frame and replayed as egui Text/Backspace/Enter events (the action key arrives as a newline); the keyboard is put away when focus leaves |
-| **Shortcut Pad** | `src/pad.rs`: a light card on either edge with 2–10 icon keys and a dial. Keys run host commands (`edit.undo`, `file.save`) or editor commands (`view.zoomIn`); the dial turns two more, one step per twelfth of a turn, and grows while held. It folds away with its arrow (a thin handle stays at the edge), drags to either edge and snaps there, and a long-press on the arrow opens its settings (`shortcut-pad.json`) |
+| **Shortcut Pad** | `src/pad.rs`: a light card on either edge with 2–10 compact 36 pt square keys (6 pt apart, 8 pt padding) and a dial. The keys carry Lucide-style 18 pt line icons (1.75 pt stroke, round caps, #4B5563) and show their names in a tooltip on hover or a long press. Keys run host commands (`edit.undo`, `file.save`) or editor commands (`view.zoomIn`); the dial turns two more, one step per twelfth of a turn, and grows while held. It folds away with its arrow (a thin handle stays at the edge), drags to either edge and snaps there, and a long-press on the arrow opens its settings (`shortcut-pad.json`) |
 | **Touch scrolling** | `src/touch.rs`: two fingers' movement becomes the wheel events winit's Android backend never emits; the pointer egui-winit made from the first finger is dropped while scrolling |
 | **Open with / Share** | The Activity accepts `ACTION_VIEW`/`ACTION_SEND` for docx/xlsx/pptx/pdf/md/txt, copies the document into `bridge/incoming/`, and the shell moves it to `bridge/documents/` and opens it once (`WeaveApp::open_external`) |
 | **Phone layout** | A phone-class screen (smallest side under 600 pt) gets the interface at 75% |
 | **Clipboard** | The Activity publishes the system clipboard to `bridge/clip.txt` (a change listener), the app's copy writes `bridge/clip-set.txt`, and the host's clipboard reads/writes through the shell's hook (`src/clipboard.rs`); in-app rich payloads still work |
-| **Printing** | The Shortcut Pad's Print key (`android.print`) exports the active document to a PDF in the bridge and the Activity hands it to Android's `PrintManager` (a `PrintDocumentAdapter` streams the file) |
-| **Updates** | `Updater.java`: checks the GitHub releases for an `android-v*` tag with an APK, compares versions, downloads and installs through Android's package installer; a startup check and the Shortcut Pad's Update key (`android.update`) trigger it |
+| **Printing** | The `android.print` action (a pad key can be pointed at it) exports the active document to a PDF in the bridge and the Activity hands it to Android's `PrintManager` (a `PrintDocumentAdapter` streams the file) |
+| **Updates** | `Updater.java`: checks the GitHub releases for an `android-v*` tag with an APK, compares versions, downloads and installs through Android's package installer; a startup check and the `android.update` action trigger it |
 | **Release APK** | `apps/weave-office-android/build.sh` → `target/android/weave-office-0.1.1-arm64-v8a.apk` (236 MB): package `local.weaveoffice.android`, versionCode 101, minSdk 26, targetSdk 35, `arm64-v8a`, debug-signed |
 
 | **CI** | `.github/workflows/android.yml`: Rust 1.95 + Android target, JDK 17, SDK/NDK, cargo-ndk, the pinned font inputs, the host tests and the APK build, uploaded as an artifact |
@@ -41,9 +41,9 @@ The APK was installed and run on an Android 15 (API 35) arm64 emulator (SwiftSha
 - wgpu picks Vulkan (SwiftShader) with the GL fallback available; the logcat says which adapter
   it got.
 
-The Shortcut Pad sits against the window's right edge and its keys work: Undo with no document
-opens the host's "open a file first" dialog, and the gear opens the pad's settings
-([pad-settings.png](images/pad-settings.png)).
+The Shortcut Pad sits against the window's edge and its keys work: Undo with no document opens
+the host's "open a file first" dialog, a long press on a key shows its name, and a long press on
+the fold arrow opens the pad's settings ([pad-settings.png](images/pad-settings.png)).
 
 ## Next
 
