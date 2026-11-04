@@ -19,6 +19,7 @@
 | **SAF bridge** | `src/bridge.rs` + `WeaveOfficeActivity`: Open/Save through Android's document pickers; picked documents are copied into `bridge/inbox/<id>/`, saves write `bridge/out/<id>/` and the Activity copies them back to the document (polled, once per write) |
 | **IME bridge** | `src/ime.rs` + the Shell wrapper: the keyboard's text state is polled each frame and replayed as egui Text/Backspace events; the keyboard is put away when focus leaves |
 | **Shortcut Pad** | `src/pad.rs`: a strip on either edge with 2–10 touch keys and a wheel; keys run host commands (`edit.undo`, `file.save`, `file.print`) or editor commands (`view.zoomIn`), the wheel turns two more, and the settings window edits them (`shortcut-pad.json`) |
+| **Touch scrolling** | `src/touch.rs`: two fingers' movement becomes the wheel events winit's Android backend never emits; the pointer egui-winit made from the first finger is dropped while scrolling |
 | **Release APK** | `apps/weave-office-android/build.sh` → `target/android/weave-office-0.1.1-arm64-v8a.apk` (236 MB): package `local.weaveoffice.android`, versionCode 101, minSdk 26, targetSdk 35, `arm64-v8a`, debug-signed |
 
 ## Next

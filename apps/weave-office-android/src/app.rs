@@ -75,6 +75,7 @@ fn run(android: AndroidApp) -> Result<(), String> {
                 ime: String::new(),
                 editing: false,
                 pad,
+                touch: crate::touch::TouchScroll::new(),
             }))
         }),
     )
@@ -91,6 +92,8 @@ struct Shell {
     editing: bool,
     /// The Shortcut Pad: touch keys and a wheel over the window's edge.
     pad: crate::pad::Pad,
+    /// Two-finger scrolling, which winit's Android backend doesn't emit.
+    touch: crate::touch::TouchScroll,
 }
 
 impl Shell {
@@ -142,6 +145,7 @@ impl eframe::App for Shell {
 
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
         self.ime_events(ctx, raw);
+        self.touch.apply(raw);
         self.app.raw_input_hook(ctx, raw);
     }
 

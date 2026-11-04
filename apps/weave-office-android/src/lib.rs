@@ -22,4 +22,7 @@ pub mod ime;
 pub mod pad;
 
 #[cfg(target_os = "android")]
+pub mod touch;
+
+#[cfg(target_os = "android")]
 pub use app::android_main;
