@@ -1,9 +1,10 @@
-//! The Shortcut Pad: a strip on the left or right edge of the window with touch keys and a
-//! wheel, for working without a keyboard. Modelled on the ArtCraft Android set's pad.
+//! The Shortcut Pad: a light strip on the window's edge with touch keys and a wheel, for
+//! working without a keyboard. Modelled on the ArtCraft Android set's pad.
 //!
-//! A key runs a host command (`edit.undo`, `file.save`, `file.print`) or an editor command
-//! (`view.zoomIn`); the wheel turns two more. The settings window edits the keys, the side and
-//! the wheel, and everything is saved in `shortcut-pad.json` in the app's files directory.
+//! The strip can be dragged to either edge (it snaps to the nearer one), folded away with its
+//! arrow (a thin handle stays at the edge), and its keys run host commands (`edit.undo`,
+//! `file.save`) or editor commands (`view.zoomIn`). Double-tapping the arrow opens the pad's
+//! settings, which are saved in `shortcut-pad.json` in the app's files directory.
 
 use std::path::{Path, PathBuf};
 
@@ -14,6 +15,15 @@ const MIN_KEYS: usize = 2;
 const MAX_KEYS: usize = 10;
 /// How far the wheel must be dragged before it runs one step.
 const WHEEL_STEP: f32 = 18.0;
+const KEY_W: f32 = 58.0;
+const KEY_H: f32 = 44.0;
+const WHEEL_H: f32 = 58.0;
+const BAR_H: f32 = 26.0;
+const COLLAPSED_W: f32 = 26.0;
+const COLLAPSED_H: f32 = 120.0;
+const PAD_W: f32 = KEY_W + 12.0;
+const MARGIN: f32 = 6.0;
+const EDGE: f32 = 8.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Side {
@@ -38,6 +48,7 @@ pub struct WheelConfig {
 pub struct PadConfig {
     pub visible: bool,
     pub side: Side,
+    pub collapsed: bool,
     pub keys: Vec<KeyConfig>,
     pub wheel: WheelConfig,
 }
@@ -47,12 +58,11 @@ impl Default for PadConfig {
         Self {
             visible: true,
             side: Side::Right,
+            collapsed: false,
             keys: vec![
                 KeyConfig { label: "Undo".into(), action: "edit.undo".into(), color: [70, 90, 120] },
                 KeyConfig { label: "Redo".into(), action: "edit.redo".into(), color: [70, 90, 120] },
                 KeyConfig { label: "Save".into(), action: "file.save".into(), color: [60, 110, 80] },
-                KeyConfig { label: "Print".into(), action: "android.print".into(), color: [110, 90, 60] },
-                KeyConfig { label: "Update".into(), action: "android.update".into(), color: [90, 70, 110] },
             ],
             wheel: WheelConfig { up: "view.zoomIn".into(), down: "view.zoomOut".into() },
         }
@@ -69,6 +79,8 @@ pub struct Pad {
     wheel_drag: f32,
     /// The strip's size as of the last frame, so the next frame can place it against the edge.
     last_size: Option<egui::Vec2>,
+    /// How far the strip has been dragged from its edge position.
+    drag_offset: egui::Vec2,
 }
 
 impl Pad {
@@ -78,7 +90,15 @@ impl Pad {
             .ok()
             .and_then(|bytes| serde_json::from_slice(&bytes).ok())
             .unwrap_or_default();
-        Self { config, path, settings_open: false, pending: None, wheel_drag: 0.0, last_size: None }
+        Self {
+            config,
+            path,
+            settings_open: false,
+            pending: None,
+            wheel_drag: 0.0,
+            last_size: None,
+            drag_offset: egui::Vec2::ZERO,
+        }
     }
 
     fn save(&self) {
@@ -97,14 +117,15 @@ impl Pad {
         if !self.config.visible {
             return;
         }
-        // Place the strip against the window's edge. The area's own size is only known after
-        // its first frame, so the first frame uses an estimate and the next ones the real size.
         let content = ctx.content_rect();
-        let size = self.last_size.unwrap_or(egui::vec2(70.0, 300.0));
-        let pos = match self.config.side {
-            Side::Left => egui::pos2(content.left() + 8.0, content.center().y - size.y / 2.0),
-            Side::Right => egui::pos2(content.right() - 8.0 - size.x, content.center().y - size.y / 2.0),
+        let size = if self.config.collapsed {
+            egui::vec2(COLLAPSED_W, COLLAPSED_H)
+        } else {
+            self.last_size.unwrap_or(egui::vec2(PAD_W, self.estimated_height()))
         };
+        let pos = self.position(content, size) + self.drag_offset;
+        let mut drag_delta = egui::Vec2::ZERO;
+        let mut drag_stopped = false;
         let response = egui::Area::new(egui::Id::new("weave-shortcut-pad"))
             .fixed_pos(pos)
             // The strip is placed against the window's edge by hand; egui's own constraint
@@ -112,52 +133,130 @@ impl Pad {
             .constrain(false)
             .order(egui::Order::Foreground)
             .show(ctx, |ui| {
-                egui::Frame::new()
-                    .fill(egui::Color32::from_black_alpha(190))
-                    .corner_radius(12.0)
-                    .inner_margin(6.0)
-                    .show(ui, |ui| {
-                        ui.vertical(|ui| {
-                            for key in &self.config.keys {
-                                let color = egui::Color32::from_rgb(key.color[0], key.color[1], key.color[2]);
-                                let button = egui::Button::new(
-                                    egui::RichText::new(&key.label).size(13.0).color(egui::Color32::WHITE),
-                                )
-                                .fill(color)
-                                .min_size(egui::vec2(58.0, 44.0));
-                                if ui.add(button).clicked() {
-                                    self.pending = Some(key.action.clone());
-                                }
-                            }
-                            ui.add_space(4.0);
-                            self.wheel(ui);
-                            ui.add_space(4.0);
-                            if ui
-                                .add(egui::Button::new(egui::RichText::new("⚙").size(16.0)).min_size(egui::vec2(58.0, 30.0)))
-                                .clicked()
-                            {
-                                self.settings_open = true;
-                            }
-                        });
-                    });
+                if self.config.collapsed {
+                    self.collapsed_handle(ui, &mut drag_delta, &mut drag_stopped);
+                } else {
+                    self.expanded(ui, &mut drag_delta, &mut drag_stopped);
+                }
             });
         self.last_size = Some(response.response.rect.size());
+        self.drag_offset += drag_delta;
+        if drag_stopped {
+            // Snap to the nearer edge, judged by where the strip ended up.
+            let x = response.response.rect.center().x;
+            self.config.side = if x < content.center().x { Side::Left } else { Side::Right };
+            self.drag_offset = egui::Vec2::ZERO;
+            self.save();
+        }
         self.settings_window(ctx);
+    }
+
+    fn estimated_height(&self) -> f32 {
+        BAR_H + self.config.keys.len() as f32 * (KEY_H + 4.0) + WHEEL_H + MARGIN * 2.0 + 8.0
+    }
+
+    fn position(&self, content: egui::Rect, size: egui::Vec2) -> egui::Pos2 {
+        let x = match self.config.side {
+            Side::Left => content.left() + EDGE,
+            Side::Right => content.right() - EDGE - size.x,
+        };
+        egui::pos2(x, content.center().y - size.y / 2.0)
+    }
+
+    /// The folded strip: a thin handle with an arrow that unfolds it.
+    fn collapsed_handle(&mut self, ui: &mut egui::Ui, drag_delta: &mut egui::Vec2, drag_stopped: &mut bool) {
+        let (rect, response) = ui.allocate_exact_size(egui::vec2(COLLAPSED_W, COLLAPSED_H), egui::Sense::click_and_drag());
+        let visuals = ui.visuals();
+        let painter = ui.painter();
+        painter.rect_filled(rect, 10.0, visuals.window_fill);
+        painter.rect_stroke(rect, 10.0, visuals.window_stroke, egui::StrokeKind::Inside);
+        let arrow = match self.config.side {
+            Side::Right => "◀",
+            Side::Left => "▶",
+        };
+        painter.text(rect.center(), egui::Align2::CENTER_CENTER, arrow, egui::FontId::proportional(14.0), visuals.text_color());
+        if response.clicked() {
+            self.config.collapsed = false;
+            self.save();
+        }
+        if response.long_touched() {
+            self.settings_open = true;
+        }
+        if response.dragged() {
+            *drag_delta += response.drag_delta();
+        }
+        if response.drag_stopped() {
+            *drag_stopped = true;
+        }
+    }
+
+    fn expanded(&mut self, ui: &mut egui::Ui, drag_delta: &mut egui::Vec2, drag_stopped: &mut bool) {
+        let visuals = ui.visuals().clone();
+        egui::Frame::new()
+            .fill(visuals.window_fill)
+            .stroke(visuals.window_stroke)
+            .corner_radius(12.0)
+            .inner_margin(MARGIN)
+            .show(ui, |ui| {
+                ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                    self.top_bar(ui, drag_delta, drag_stopped);
+                    for key in &self.config.keys {
+                        if key_button(ui, key) {
+                            self.pending = Some(key.action.clone());
+                        }
+                    }
+                    self.wheel(ui);
+                });
+            });
+    }
+
+    /// The strip's top bar: the fold arrow and a drag grip.
+    fn top_bar(&mut self, ui: &mut egui::Ui, drag_delta: &mut egui::Vec2, drag_stopped: &mut bool) {
+        let (rect, response) = ui.allocate_exact_size(egui::vec2(KEY_W, BAR_H), egui::Sense::click_and_drag());
+        let visuals = ui.visuals();
+        let painter = ui.painter();
+        let arrow = match self.config.side {
+            Side::Right => "▶",
+            Side::Left => "◀",
+        };
+        painter.text(
+            egui::pos2(rect.left() + 10.0, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            arrow,
+            egui::FontId::proportional(12.0),
+            visuals.weak_text_color(),
+        );
+        painter.text(
+            egui::pos2(rect.right() - 10.0, rect.center().y),
+            egui::Align2::RIGHT_CENTER,
+            "⋮⋮",
+            egui::FontId::proportional(12.0),
+            visuals.weak_text_color(),
+        );
+        if response.clicked() {
+            self.config.collapsed = true;
+            self.save();
+        }
+        if response.long_touched() {
+            self.settings_open = true;
+        }
+        if response.dragged() {
+            *drag_delta += response.drag_delta();
+        }
+        if response.drag_stopped() {
+            *drag_stopped = true;
+        }
     }
 
     /// The wheel: drag up or down to run its two actions, one step per `WHEEL_STEP`.
     fn wheel(&mut self, ui: &mut egui::Ui) {
-        let (rect, response) = ui.allocate_exact_size(egui::vec2(58.0, 58.0), egui::Sense::click_and_drag());
+        let (rect, response) = ui.allocate_exact_size(egui::vec2(KEY_W, WHEEL_H), egui::Sense::click_and_drag());
+        let center = rect.center();
+        let visuals = ui.visuals();
         let painter = ui.painter();
-        painter.circle_filled(rect.center(), 27.0, egui::Color32::from_rgb(48, 50, 58));
-        painter.circle_stroke(rect.center(), 27.0, egui::Stroke::new(2.0, egui::Color32::from_gray(120)));
-        painter.text(
-            rect.center(),
-            egui::Align2::CENTER_CENTER,
-            "◎",
-            egui::FontId::proportional(22.0),
-            egui::Color32::from_gray(210),
-        );
+        painter.circle_filled(center, 26.0, visuals.widgets.inactive.bg_fill);
+        painter.circle_stroke(center, 26.0, egui::Stroke::new(2.0, visuals.widgets.inactive.fg_stroke.color));
+        painter.text(center, egui::Align2::CENTER_CENTER, "◎", egui::FontId::proportional(22.0), visuals.text_color());
         if response.dragged() {
             self.wheel_drag += response.drag_delta().y;
             while self.wheel_drag <= -WHEEL_STEP {
@@ -234,4 +333,36 @@ impl Pad {
         }
         self.save();
     }
+}
+
+/// One key: a light rounded button with the key's colour as a thin bar, growing a little while
+/// it is pressed.
+fn key_button(ui: &mut egui::Ui, key: &KeyConfig) -> bool {
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(KEY_W, KEY_H), egui::Sense::click());
+    let pressed = response.is_pointer_button_down_on();
+    let visuals = ui.visuals();
+    let fill = if pressed {
+        visuals.widgets.active.bg_fill
+    } else if response.hovered() {
+        visuals.widgets.hovered.bg_fill
+    } else {
+        visuals.widgets.inactive.bg_fill
+    };
+    let rect = if pressed { rect.expand(2.0) } else { rect };
+    let painter = ui.painter();
+    painter.rect_filled(rect, 8.0, fill);
+    let accent = egui::Color32::from_rgb(key.color[0], key.color[1], key.color[2]);
+    let bar = egui::Rect::from_min_max(
+        egui::pos2(rect.left() + 10.0, rect.bottom() - 5.0),
+        egui::pos2(rect.right() - 10.0, rect.bottom() - 2.0),
+    );
+    painter.rect_filled(bar, 1.5, accent);
+    painter.text(
+        rect.center() - egui::vec2(0.0, 2.0),
+        egui::Align2::CENTER_CENTER,
+        &key.label,
+        egui::FontId::proportional(13.0),
+        visuals.text_color(),
+    );
+    response.clicked()
 }
