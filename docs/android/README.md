@@ -1,8 +1,9 @@
 # Weave Office on Android
 
-> **Status:** the launcher, the Gradle project, the SAF document bridge and the soft-keyboard
-> bridge are in place; the release APK builds. The Shortcut Pad, printing, file associations and
-> updates are the next layers.
+> **Status:** a working prototype. The launcher, the SAF document bridge, the soft-keyboard and
+> modifier bridges, the Shortcut Pad, touch gestures, the pen, the clipboard, printing, file
+> associations and the updater are in place; the release APK builds and CI publishes it.
+> [STATUS.md](STATUS.md) is the detailed log.
 
 Weave Office on Android tablets and phones: the same workspace (documents, spreadsheets,
 presentations, PDF, Markdown, code) in an arm64-v8a APK for Android 8.0 (API 26) and newer, built
@@ -32,13 +33,45 @@ WeaveOfficeActivity.java (extends GameActivity)      libweave_office_android.so 
   shell polls the keyboard's text state each frame and replays the changes as egui Text and
   Backspace events (`src/ime.rs`).
 - **The five layers** (following the ArtCraft Android set):
-  1. launcher (`src/app.rs`, this crate) — done;
-  2. bridges (SAF, IME) — done; clipboard — next;
-  3. vendored dependency patches (winit/egui-winit/android-activity) — next;
+  1. launcher (`src/app.rs`, this crate) — the `Shell` around `WeaveApp`;
+  2. bridges — SAF documents, the soft keyboard, the modifiers, the clipboard, the pointer's tool
+     type, printing;
+  3. vendored dependency patches (`vendor/rfd`, `vendor/arboard`) — the Android backends upstream
+     lacks;
   4. build-time patches (the host's desktop-only paths, `src/file_dialog.rs`,
-     `src/clipboard.rs`) — done;
-  5. shared templates (`SafActivity.java`, `saf_bridge.rs`, `ime_bridge.rs`,
-     `system_fonts.rs`) — the Activity and the two bridges are in place; system fonts next.
+     `src/clipboard.rs`) — Android branches;
+  5. shared templates — `WeaveOfficeActivity.java`, `bridge.rs`, `ime.rs`, `touch.rs`,
+     `pad.rs`, and `crates/system-fonts`' Android font folders.
+
+## Releases
+
+`.github/workflows/android.yml` builds the APK on every push and pull request, and publishes a
+release for every `android-v<version>` tag:
+
+```sh
+git tag android-v0.1.1
+git push origin android-v0.1.1
+```
+
+The release carries the APK and the tag names the version, which is what the in-app updater reads
+(`Updater.java`). The release key is committed
+(`apps/weave-office-android/android/weave-release.jks`) so CI's APK updates a locally built one;
+a fork that publishes its own releases should point `WEAVE_KEYSTORE` at its own key.
+
+## Keeping up with upstream
+
+This repository is a fork of [Jamailar/Weave-Office](https://github.com/Jamailar/Weave-Office) with
+the Android shell added on top:
+
+```sh
+git remote add upstream https://github.com/Jamailar/Weave-Office.git   # once
+git fetch upstream
+git merge upstream/main
+```
+
+The port's changes are kept in `apps/weave-office-android/`, `docs/android/`,
+`crates/system-fonts/`, and a few hooks in `src/app.rs` and `Cargo.toml`; the engines under
+`vendor/` are not modified by the port, so an upstream engine change only needs the shell updated.
 
 ## Build
 
