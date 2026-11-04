@@ -15,8 +15,9 @@ const MIN_KEYS: usize = 2;
 const MAX_KEYS: usize = 10;
 /// How far the wheel must be turned before it runs one step (one twelfth of a turn).
 const WHEEL_STEP: f32 = std::f32::consts::TAU / 12.0;
-const KEY_W: f32 = 58.0;
-const KEY_H: f32 = 52.0;
+const KEY_W: f32 = 56.0;
+const KEY_H: f32 = 64.0;
+const KEY_RADIUS: f32 = 24.0;
 const WHEEL_SIZE: f32 = 64.0;
 const BAR_H: f32 = 26.0;
 const COLLAPSED_W: f32 = 26.0;
@@ -395,45 +396,35 @@ impl Pad {
     }
 }
 
-/// One key: a soft rounded button with an icon, its label and the key's colour as a thin bar,
-/// growing a little while it is pressed.
+/// One key: a round button with an icon, its label underneath, growing a little while it is
+/// pressed.
 fn key_button(ui: &mut egui::Ui, key: &KeyConfig) -> bool {
     let (rect, response) = ui.allocate_exact_size(egui::vec2(KEY_W, KEY_H), egui::Sense::click());
     let pressed = response.is_pointer_button_down_on();
     let grow = ui.ctx().animate_bool_with_time(ui.id().with(&key.label), pressed, 0.08);
-    let rect = rect.expand(2.0 * grow);
     let visuals = ui.visuals();
     let painter = ui.painter();
-    let shadow = egui::epaint::Shadow { offset: [0, 2], blur: 6, spread: 0, color: egui::Color32::from_black_alpha(28) };
-    painter.add(shadow.as_shape(rect, 12.0));
+    let radius = KEY_RADIUS * (1.0 + 0.08 * grow);
+    let center = egui::pos2(rect.center().x, rect.top() + KEY_RADIUS);
+    let circle = egui::Rect::from_center_size(center, egui::Vec2::splat(radius * 2.0));
+    let shadow = egui::epaint::Shadow { offset: [0, 2], blur: 8, spread: 0, color: egui::Color32::from_black_alpha(30) };
+    painter.add(shadow.as_shape(circle, radius));
     let fill = if pressed { visuals.widgets.active.bg_fill } else { visuals.widgets.inactive.bg_fill };
-    painter.rect_filled(rect, 12.0, fill);
-    painter.rect_stroke(rect, 12.0, egui::Stroke::new(1.0, visuals.widgets.inactive.bg_stroke.color), egui::StrokeKind::Inside);
+    painter.circle_filled(center, radius, fill);
+    painter.circle_stroke(center, radius, egui::Stroke::new(1.0, visuals.widgets.inactive.bg_stroke.color));
     let icon = match key.action.as_str() {
         "edit.undo" => "↶",
         "edit.redo" => "↷",
         "file.save" => "⤓",
         _ => "•",
     };
+    painter.text(center, egui::Align2::CENTER_CENTER, icon, egui::FontId::proportional(22.0), visuals.text_color());
     painter.text(
-        rect.center() - egui::vec2(0.0, 7.0),
-        egui::Align2::CENTER_CENTER,
-        icon,
-        egui::FontId::proportional(20.0),
-        visuals.text_color(),
-    );
-    painter.text(
-        rect.center() + egui::vec2(0.0, 14.0),
+        egui::pos2(rect.center().x, rect.bottom() - 6.0),
         egui::Align2::CENTER_CENTER,
         &key.label,
         egui::FontId::proportional(10.0),
         visuals.weak_text_color(),
     );
-    let accent = egui::Color32::from_rgb(key.color[0], key.color[1], key.color[2]);
-    let bar = egui::Rect::from_min_max(
-        egui::pos2(rect.left() + 12.0, rect.bottom() - 5.0),
-        egui::pos2(rect.right() - 12.0, rect.bottom() - 3.0),
-    );
-    painter.rect_filled(bar, 1.0, accent);
     response.clicked()
 }
