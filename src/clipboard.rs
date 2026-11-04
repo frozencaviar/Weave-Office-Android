@@ -10,6 +10,32 @@ use std::{
 const OBJECTS_MARKER: &str = "\u{2060}";
 static COPY_SERIAL: AtomicU64 = AtomicU64::new(1);
 
+/// The shell's system clipboard on Android: the platform has no arboard backend, so the shell
+/// answers through its file bridge (the Activity owns the real clipboard).
+#[cfg(target_os = "android")]
+pub mod android {
+    use std::sync::OnceLock;
+
+    /// The shell's clipboard: put text on the system clipboard (returning a revision that
+    /// changes with it), read its text, and report the current revision.
+    pub struct Clipboard {
+        pub set: Box<dyn Fn(&str) -> i64 + Send + Sync>,
+        pub get: Box<dyn Fn() -> Option<String> + Send + Sync>,
+        pub revision: Box<dyn Fn() -> i64 + Send + Sync>,
+    }
+
+    static CLIPBOARD: OnceLock<Clipboard> = OnceLock::new();
+
+    /// Install the shell's clipboard, once, before the app starts.
+    pub fn install(clipboard: Clipboard) {
+        let _ = CLIPBOARD.set(clipboard);
+    }
+
+    pub(crate) fn get() -> Option<&'static Clipboard> {
+        CLIPBOARD.get()
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct Clipboard(Rc<RefCell<State>>);
 
@@ -359,7 +385,9 @@ impl State {
         }
         #[cfg(target_os = "macos")]
         return Some(objc2_app_kit::NSPasteboard::generalPasteboard().changeCount() as i64);
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(target_os = "android")]
+        return Some(android::get().map(|clipboard| (clipboard.revision)()).unwrap_or(0));
+        #[cfg(not(any(target_os = "macos", target_os = "android")))]
         None
     }
 
@@ -389,7 +417,7 @@ impl State {
         }
         #[cfg(target_os = "android")]
         {
-            None
+            android::get().and_then(|clipboard| (clipboard.get)())
         }
     }
 
@@ -431,9 +459,9 @@ impl State {
         }
         #[cfg(target_os = "android")]
         {
-            // The JNI clipboard bridge is a later layer; in-app copies still work.
-            let _ = (html, text, mathml);
-            Ok(None)
+            let _ = (html, mathml);
+            let clipboard = android::get().ok_or("无法访问系统剪贴板")?;
+            Ok(Some((clipboard.set)(text)))
         }
         #[cfg(all(not(target_os = "macos"), not(target_os = "android")))]
         {

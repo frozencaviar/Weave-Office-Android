@@ -39,6 +39,20 @@ fn run(android: AndroidApp) -> Result<(), String> {
     let bridge = std::sync::Arc::new(
         crate::bridge::Bridge::new(&files_dir).map_err(|e| format!("couldn't create the file bridge: {e}"))?,
     );
+    weave_office::clipboard::android::install(weave_office::clipboard::android::Clipboard {
+        set: {
+            let bridge = bridge.clone();
+            Box::new(move |text| bridge.set_clipboard(text))
+        },
+        get: {
+            let bridge = bridge.clone();
+            Box::new(move || bridge.clipboard_text())
+        },
+        revision: {
+            let bridge = bridge.clone();
+            Box::new(move || bridge.clipboard_revision())
+        },
+    });
     weave_office::file_dialog::android::install(weave_office::file_dialog::android::Picker {
         request: {
             let bridge = bridge.clone();

@@ -90,6 +90,37 @@ impl Bridge {
         paths
     }
 
+    /// Put text on the system clipboard; returns a revision that changes with it.
+    pub fn set_clipboard(&self, text: &str) -> i64 {
+        let _ = write_then_rename(&self.root.join("clip-set.txt"), text.as_bytes());
+        // The Activity publishes the new clipboard (it writes clip.txt when it changes); wait
+        // for that so the revision the host stores is the one the system now has.
+        let before = self.clipboard_revision();
+        for _ in 0..30 {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            let now = self.clipboard_revision();
+            if now != before {
+                return now;
+            }
+        }
+        self.clipboard_revision()
+    }
+
+    /// The system clipboard's text, as the Activity last published it.
+    pub fn clipboard_text(&self) -> Option<String> {
+        fs::read_to_string(self.root.join("clip.txt")).ok()
+    }
+
+    /// A revision that changes when the clipboard does (the file's modification time).
+    pub fn clipboard_revision(&self) -> i64 {
+        fs::metadata(self.root.join("clip.txt"))
+            .and_then(|meta| meta.modified())
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|duration| duration.as_millis() as i64)
+            .unwrap_or(0)
+    }
+
     /// Poll the Activity's answer for `id`.
     pub fn poll(&self, id: u64) -> Option<FileDialogResult> {
         let path = self.root.join("answer.json");
@@ -194,6 +225,15 @@ mod tests {
         assert_eq!(request["kind"], "save");
         assert_eq!(request["file_name"], "Report.docx");
         assert_eq!(request["extensions"], serde_json::json!(["docx", "doc"]));
+    }
+
+    #[test]
+    fn the_clipboard_is_read_from_the_bridge() {
+        let (_dir, bridge) = bridge();
+        assert_eq!(bridge.clipboard_text(), None);
+        fs::write(bridge.root().join("clip.txt"), "hello").unwrap();
+        assert_eq!(bridge.clipboard_text().as_deref(), Some("hello"));
+        assert!(bridge.clipboard_revision() > 0);
     }
 
     #[test]

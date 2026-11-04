@@ -22,6 +22,7 @@
 | **Touch scrolling** | `src/touch.rs`: two fingers' movement becomes the wheel events winit's Android backend never emits; the pointer egui-winit made from the first finger is dropped while scrolling |
 | **Open with / Share** | The Activity accepts `ACTION_VIEW`/`ACTION_SEND` for docx/xlsx/pptx/pdf/md/txt, copies the document into `bridge/incoming/`, and the shell moves it to `bridge/documents/` and opens it once (`WeaveApp::open_external`) |
 | **Phone layout** | A phone-class screen (smallest side under 600 pt) gets the interface at 75% |
+| **Clipboard** | The Activity publishes the system clipboard to `bridge/clip.txt` (a change listener), the app's copy writes `bridge/clip-set.txt`, and the host's clipboard reads/writes through the shell's hook (`src/clipboard.rs`); in-app rich payloads still work |
 | **Release APK** | `apps/weave-office-android/build.sh` → `target/android/weave-office-0.1.1-arm64-v8a.apk` (236 MB): package `local.weaveoffice.android`, versionCode 101, minSdk 26, targetSdk 35, `arm64-v8a`, debug-signed |
 
 ## Next

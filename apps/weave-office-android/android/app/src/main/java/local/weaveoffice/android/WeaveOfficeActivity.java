@@ -70,6 +70,7 @@ public class WeaveOfficeActivity extends GameActivity {
             try {
                 checkRequest();
                 checkSync();
+                checkClipboard();
                 checkQuit();
             } catch (Exception e) {
                 Log.e(TAG, "bridge", e);
@@ -95,6 +96,14 @@ public class WeaveOfficeActivity extends GameActivity {
             getWindow().setAttributes(lp);
         }
         handleSentDocument(getIntent());
+        // The system clipboard: publish it to the bridge whenever it changes, so the app's
+        // paste reads the current text without a round trip.
+        android.content.ClipboardManager clipboard =
+                (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+        if (clipboard != null) {
+            clipboard.addPrimaryClipChangedListener(this::writeClipboard);
+            writeClipboard();
+        }
         handler.post(poll);
     }
 
@@ -325,6 +334,60 @@ public class WeaveOfficeActivity extends GameActivity {
         //noinspection ResultOfMethodCallIgnored
         f.delete();
         finish();
+    }
+
+    // ---- Clipboard -------------------------------------------------------------------------
+
+    /** Publish the system clipboard's text to the bridge (the app's paste reads it). */
+    private void writeClipboard() {
+        android.content.ClipboardManager clipboard =
+                (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+        if (clipboard == null) {
+            return;
+        }
+        String text = "";
+        ClipData clip = clipboard.getPrimaryClip();
+        if (clip != null && clip.getItemCount() > 0) {
+            CharSequence value = clip.getItemAt(0).coerceToText(this);
+            if (value != null) {
+                text = value.toString();
+            }
+        }
+        try {
+            File tmp = new File(bridge, "clip.txt.tmp");
+            try (OutputStream out = new FileOutputStream(tmp)) {
+                out.write(text.getBytes(StandardCharsets.UTF_8));
+            }
+            if (!tmp.renameTo(new File(bridge, "clip.txt"))) {
+                Log.w(TAG, "clipboard: rename failed");
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "clipboard", e);
+        }
+    }
+
+    /** The app copied text: put it on the system clipboard. */
+    private void checkClipboard() {
+        File set = new File(bridge, "clip-set.txt");
+        if (!set.isFile()) {
+            return;
+        }
+        String text;
+        try {
+            text = readText(set);
+        } catch (Exception e) {
+            Log.e(TAG, "clipboard", e);
+            //noinspection ResultOfMethodCallIgnored
+            set.delete();
+            return;
+        }
+        //noinspection ResultOfMethodCallIgnored
+        set.delete();
+        android.content.ClipboardManager clipboard =
+                (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+        if (clipboard != null) {
+            clipboard.setPrimaryClip(ClipData.newPlainText("Weave Office", text));
+        }
     }
 
     // ---- Documents from other apps ---------------------------------------------------------
