@@ -220,7 +220,7 @@ impl eframe::App for Shell {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         self.app.ui(ui, frame);
         // The pad draws over the app's edge, so it is on top of the window.
-        self.pad.show(ui.ctx());
+        self.pad.show(ui.ctx(), self.app.zoom_percent());
     }
 
     fn on_exit(&mut self, gl: Option<&eframe::glow::Context>) {

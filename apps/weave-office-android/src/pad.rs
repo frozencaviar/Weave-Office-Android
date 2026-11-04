@@ -1,13 +1,15 @@
-//! The Shortcut Pad: a light strip on the window's edge with touch keys and a wheel, for
+//! The Shortcut Pad: a light strip on the window's edge with touch keys and a dial, for
 //! working without a keyboard. Modelled on the ArtCraft Android set's pad.
 //!
 //! The strip can be dragged to either edge (it snaps to the nearer one), folded away with its
-//! arrow (a thin handle stays at the edge), and its keys run host commands (`edit.undo`,
-//! `file.save`) or editor commands (`view.zoomIn`). A long press on the arrow opens the pad's
-//! settings, which are saved in `shortcut-pad.json` in the app's files directory.
+//! arrow, and its keys run host commands (`edit.undo`, `file.save`) or editor commands
+//! (`view.zoomIn`). A long press on the arrow opens the pad's settings, which are saved in
+//! `shortcut-pad.json` in the app's files directory.
 //!
 //! The keys are compact 36 pt squares, 6 pt apart in 8 pt of padding, with Lucide-style 18 pt
-//! line icons (1.75 pt stroke, round caps) and their names in a tooltip on hover.
+//! line icons (1.75 pt stroke, round caps) and their names in a tooltip on hover. The wheel is
+//! a minimal 36 pt ring; pressing it opens a 172 pt dial anchored at the strip's edge, with an
+//! orange progress arc and the current zoom in its middle.
 
 use std::path::{Path, PathBuf};
 
@@ -16,7 +18,7 @@ use serde::{Deserialize, Serialize};
 
 const MIN_KEYS: usize = 2;
 const MAX_KEYS: usize = 10;
-/// How far the wheel must be turned before it runs one step (one twelfth of a turn).
+/// How far the dial must be turned before it runs one step (one twelfth of a turn).
 const WHEEL_STEP: f32 = std::f32::consts::TAU / 12.0;
 
 /// The keys: compact 36 pt squares, 6 pt apart, inside 8 pt of padding.
@@ -31,10 +33,23 @@ const ICON_STROKE: f32 = 1.75 * ICON / 24.0;
 const ICON_COLOR: egui::Color32 = egui::Color32::from_rgb(0x4B, 0x55, 0x63);
 const WHEEL_SIZE: f32 = 36.0;
 const BAR_H: f32 = 20.0;
-const COLLAPSED_W: f32 = 20.0;
-const COLLAPSED_H: f32 = 88.0;
 const EDGE: f32 = 8.0;
 const WHEEL_GAP: f32 = 10.0;
+
+/// The dial that opens from the wheel: 172 pt across, anchored at the strip's edge.
+const DIAL: f32 = 172.0;
+const DIAL_TICKS: usize = 36;
+const ACCENT: egui::Color32 = egui::Color32::from_rgb(0xF5, 0x9E, 0x0B);
+const DIAL_LABEL: egui::Color32 = egui::Color32::from_rgb(0x6B, 0x72, 0x80);
+const DIAL_VALUE: egui::Color32 = egui::Color32::from_rgb(0x11, 0x18, 0x27);
+const RING: egui::Color32 = egui::Color32::from_rgb(0xE5, 0xE7, 0xEB);
+const TICK: egui::Color32 = egui::Color32::from_rgb(0x9C, 0xA3, 0xAF);
+
+/// The fold and dial animations: ease-out-quint, and a slight overshoot for the dial.
+const FOLD_CURVE: [f32; 4] = [0.22, 1.0, 0.36, 1.0];
+const DIAL_CURVE: [f32; 4] = [0.34, 1.56, 0.64, 1.0];
+const FOLD_TIME: f32 = 0.3;
+const DIAL_TIME: f32 = 0.28;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Side {
@@ -80,20 +95,125 @@ impl Default for PadConfig {
     }
 }
 
+/// A time-based animation with a cubic-bezier curve.
+struct Anim {
+    value: f32,
+    from: f32,
+    to: f32,
+    start: f64,
+    duration: f32,
+    curve: [f32; 4],
+}
+
+impl Anim {
+    fn new(value: f32) -> Self {
+        Self { value, from: value, to: value, start: 0.0, duration: 0.0, curve: FOLD_CURVE }
+    }
+
+    fn set(&mut self, target: f32, now: f64, duration: f32, curve: [f32; 4]) {
+        if (target - self.to).abs() > 1e-4 {
+            self.from = self.value;
+            self.to = target;
+            self.start = now;
+            self.duration = duration;
+            self.curve = curve;
+        }
+    }
+
+    fn update(&mut self, now: f64) -> f32 {
+        if self.duration <= 0.0 {
+            self.value = self.to;
+            return self.value;
+        }
+        let t = (((now - self.start) / self.duration as f64) as f32).clamp(0.0, 1.0);
+        self.value = self.from + (self.to - self.from) * bezier(self.curve, t);
+        self.value
+    }
+
+    fn running(&self, now: f64) -> bool {
+        self.duration > 0.0 && now < self.start + self.duration as f64
+    }
+}
+
+/// A CSS-style cubic-bezier easing: solve x(u) = t, then return y(u).
+fn bezier(curve: [f32; 4], t: f32) -> f32 {
+    let [x1, y1, x2, y2] = curve;
+    let mut u = t;
+    for _ in 0..6 {
+        let x = bezier_axis(x1, x2, u) - t;
+        if x.abs() < 1e-4 {
+            break;
+        }
+        let dx = bezier_derivative(x1, x2, u);
+        if dx.abs() < 1e-6 {
+            break;
+        }
+        u = (u - x / dx).clamp(0.0, 1.0);
+    }
+    bezier_axis(y1, y2, u)
+}
+
+fn bezier_axis(a: f32, b: f32, u: f32) -> f32 {
+    let v = 1.0 - u;
+    3.0 * v * v * u * a + 3.0 * v * u * u * b + u * u * u
+}
+
+fn bezier_derivative(a: f32, b: f32, u: f32) -> f32 {
+    let v = 1.0 - u;
+    3.0 * v * v * a + 6.0 * v * u * (b - a) + 3.0 * u * u * (1.0 - b)
+}
+
+/// Where the strip's parts sit for a given card rect.
+struct Layout {
+    card: egui::Rect,
+    header: egui::Rect,
+    keys: Vec<egui::Rect>,
+    wheel: egui::Rect,
+}
+
+impl Layout {
+    fn new(card: egui::Rect, count: usize) -> Self {
+        let header = egui::Rect::from_min_size(
+            egui::pos2(card.center().x - KEY / 2.0, card.top() + PAD_PAD),
+            egui::vec2(KEY, BAR_H),
+        );
+        let mut keys = Vec::with_capacity(count);
+        let mut y = header.bottom() + 4.0;
+        for _ in 0..count {
+            keys.push(egui::Rect::from_min_size(
+                egui::pos2(card.center().x - KEY / 2.0, y),
+                egui::Vec2::splat(KEY),
+            ));
+            y += KEY + KEY_GAP;
+        }
+        let wheel = egui::Rect::from_min_size(
+            egui::pos2(card.center().x - WHEEL_SIZE / 2.0, y - KEY_GAP + WHEEL_GAP),
+            egui::Vec2::splat(WHEEL_SIZE),
+        );
+        Self { card, header, keys, wheel }
+    }
+}
+
 pub struct Pad {
     config: PadConfig,
     path: PathBuf,
     settings_open: bool,
-    /// The action a key or the wheel asked for, run on the next frame.
+    /// The action a key or the dial asked for, run on the next frame.
     pending: Option<String>,
-    /// The angle the wheel was last dragged to, while it is being turned.
+    /// The pointer's last angle while the dial is being turned.
     wheel_angle: Option<f32>,
-    /// The angle turned since the wheel last ran a step.
+    /// The rotation since the dial opened, for its arc and ticks.
     wheel_turn: f32,
-    /// When the wheel was pressed, for its long-press enlargement.
-    wheel_held: Option<f64>,
-    /// The strip's size as of the last frame, so the next frame can place it against the edge.
-    last_size: Option<egui::Vec2>,
+    /// The rotation since the last step, which runs the wheel's actions.
+    wheel_step: f32,
+    /// The wheel is held down.
+    wheel_pressed: bool,
+    /// The dial stays open after a tap.
+    wheel_pinned: bool,
+    /// 0 = expanded, 1 = folded.
+    fold: Anim,
+    /// 0 = the wheel, 1 = the dial.
+    dial: Anim,
     /// How far the strip has been dragged from its edge position.
     drag_offset: egui::Vec2,
 }
@@ -101,10 +221,11 @@ pub struct Pad {
 impl Pad {
     pub fn new(files_dir: &Path) -> Self {
         let path = files_dir.join("shortcut-pad.json");
-        let config = std::fs::read(&path)
+        let config: PadConfig = std::fs::read(&path)
             .ok()
             .and_then(|bytes| serde_json::from_slice(&bytes).ok())
             .unwrap_or_default();
+        let collapsed = config.collapsed;
         Self {
             config,
             path,
@@ -112,8 +233,11 @@ impl Pad {
             pending: None,
             wheel_angle: None,
             wheel_turn: 0.0,
-            wheel_held: None,
-            last_size: None,
+            wheel_step: 0.0,
+            wheel_pressed: false,
+            wheel_pinned: false,
+            fold: Anim::new(if collapsed { 1.0 } else { 0.0 }),
+            dial: Anim::new(0.0),
             drag_offset: egui::Vec2::ZERO,
         }
     }
@@ -124,23 +248,48 @@ impl Pad {
         }
     }
 
-    /// The action a key or the wheel asked for, if any (the shell dispatches it).
+    /// The action a key or the dial asked for, if any (the shell dispatches it).
     pub fn take_pending(&mut self) -> Option<String> {
         self.pending.take()
     }
 
-    /// Draw the strip over the window's edge.
-    pub fn show(&mut self, ctx: &egui::Context) {
+    /// Draw the strip over the window's edge. `zoom` is the active document's zoom in percent,
+    /// shown in the dial's middle.
+    pub fn show(&mut self, ctx: &egui::Context, zoom: Option<f32>) {
         if !self.config.visible {
             return;
         }
+        let now = ctx.input(|i| i.time);
         let content = ctx.content_rect();
-        let size = if self.config.collapsed {
-            egui::vec2(COLLAPSED_W, COLLAPSED_H)
-        } else {
-            self.last_size.unwrap_or(egui::vec2(PAD_W, self.estimated_height()))
-        };
+        self.fold.set(if self.config.collapsed { 1.0 } else { 0.0 }, now, FOLD_TIME, FOLD_CURVE);
+        let fold = self.fold.update(now);
+        let active = self.wheel_pinned || self.wheel_pressed;
+        self.dial.set(if active { 1.0 } else { 0.0 }, now, DIAL_TIME, DIAL_CURVE);
+        let dial_t = self.dial.update(now);
+        if !active && dial_t < 0.01 {
+            self.wheel_turn = 0.0;
+            self.wheel_step = 0.0;
+            self.wheel_angle = None;
+        }
+
+        let expanded_h = self.estimated_height();
+        let collapsed_h = BAR_H + PAD_PAD * 2.0;
+        let height = expanded_h + (collapsed_h - expanded_h) * fold;
+        let size = egui::vec2(PAD_W, height);
         let pos = self.position(content, size) + self.drag_offset;
+        let card = egui::Rect::from_min_size(pos, size);
+        let layout = Layout::new(card, self.config.keys.len());
+        let dial_rect = self.dial_rect(&layout, dial_t);
+
+        // A press outside the dial and the strip closes it.
+        if self.wheel_pinned && ctx.input(|i| i.pointer.any_pressed()) {
+            if let Some(pointer) = ctx.input(|i| i.pointer.interact_pos()) {
+                if !dial_rect.contains(pointer) && !card.contains(pointer) {
+                    self.wheel_pinned = false;
+                }
+            }
+        }
+
         let mut drag_delta = egui::Vec2::ZERO;
         let mut drag_stopped = false;
         let response = egui::Area::new(egui::Id::new("weave-shortcut-pad"))
@@ -150,13 +299,49 @@ impl Pad {
             .constrain(false)
             .order(egui::Order::Foreground)
             .show(ctx, |ui| {
-                if self.config.collapsed {
-                    self.collapsed_handle(ui, &mut drag_delta, &mut drag_stopped);
-                } else {
-                    self.expanded(ui, &mut drag_delta, &mut drag_stopped);
+                ui.set_min_size(size);
+                self.draw_card(ui, &layout);
+                self.draw_header(ui, &layout, fold, &mut drag_delta, &mut drag_stopped);
+                let (wheel_response, tooltips) = self.draw_content(ui, &layout, fold);
+                for (rect, label, tip) in tooltips {
+                    if tip > 0.01 && fold < 0.01 {
+                        paint_tooltip(ui, rect, &label, tip);
+                    }
                 }
+                let dial_response = if dial_t > 0.05 {
+                    let response = ui.interact(
+                        dial_rect,
+                        ui.scope_id().with("weave-pad-dial"),
+                        egui::Sense::click_and_drag(),
+                    );
+                    self.draw_dial(ui, &layout, dial_t, zoom);
+                    Some(response)
+                } else {
+                    None
+                };
+                // Turning: the pointer's angle around the dial's middle.
+                let dragged = dial_response.as_ref().is_some_and(|r| r.dragged()) || wheel_response.dragged();
+                let pointer = dial_response
+                    .as_ref()
+                    .and_then(|r| r.interact_pointer_pos())
+                    .or_else(|| wheel_response.interact_pointer_pos());
+                if dragged {
+                    if let Some(pointer) = pointer {
+                        let center = if dial_t > 0.5 { dial_rect.center() } else { layout.wheel.center() };
+                        self.turn(pointer, center);
+                    }
+                } else {
+                    self.wheel_angle = None;
+                }
+                // A tap on the wheel opens the dial; a tap on the dial closes it.
+                if wheel_response.clicked() {
+                    self.wheel_pinned = !self.wheel_pinned;
+                }
+                if dial_response.as_ref().is_some_and(|r| r.clicked()) {
+                    self.wheel_pinned = false;
+                }
+                self.wheel_pressed = wheel_response.is_pointer_button_down_on();
             });
-        self.last_size = Some(response.response.rect.size());
         self.drag_offset += drag_delta;
         if drag_stopped {
             // Snap to the nearer edge, judged by where the strip ended up.
@@ -165,18 +350,22 @@ impl Pad {
             self.drag_offset = egui::Vec2::ZERO;
             self.save();
         }
+        if self.fold.running(now) || self.dial.running(now) {
+            ctx.request_repaint();
+        }
         self.settings_window(ctx);
     }
 
     fn estimated_height(&self) -> f32 {
         let count = self.config.keys.len() as f32;
-        BAR_H
+        PAD_PAD
+            + BAR_H
             + 4.0
             + count * KEY
             + (count - 1.0).max(0.0) * KEY_GAP
             + WHEEL_GAP
             + WHEEL_SIZE
-            + PAD_PAD * 2.0
+            + PAD_PAD
     }
 
     fn position(&self, content: egui::Rect, size: egui::Vec2) -> egui::Pos2 {
@@ -187,100 +376,58 @@ impl Pad {
         egui::pos2(x, content.center().y - size.y / 2.0)
     }
 
-    /// The folded strip: a thin handle with an arrow that unfolds it.
-    fn collapsed_handle(&mut self, ui: &mut egui::Ui, drag_delta: &mut egui::Vec2, drag_stopped: &mut bool) {
-        let (rect, response) = ui.allocate_exact_size(egui::vec2(COLLAPSED_W, COLLAPSED_H), egui::Sense::click_and_drag());
-        let visuals = ui.visuals().clone();
+    /// The dial's bounding box: anchored at the strip's edge, centred on the wheel.
+    fn dial_rect(&self, layout: &Layout, t: f32) -> egui::Rect {
+        let radius = DIAL / 2.0 * t;
+        let center = match self.config.side {
+            Side::Left => egui::pos2(layout.card.left() + radius, layout.wheel.center().y),
+            Side::Right => egui::pos2(layout.card.right() - radius, layout.wheel.center().y),
+        };
+        egui::Rect::from_center_size(center, egui::Vec2::splat(radius * 2.0))
+    }
+
+    fn draw_card(&self, ui: &egui::Ui, layout: &Layout) {
+        let visuals = ui.visuals();
         let painter = ui.painter();
         painter.add(
             egui::epaint::Shadow {
                 offset: [0, 2],
-                blur: 8,
-                spread: 0,
-                color: egui::Color32::from_black_alpha(24),
-            }
-            .as_shape(rect, 10.0),
-        );
-        painter.rect_filled(rect, 10.0, visuals.window_fill);
-        // The arrow points away from the edge, the way the strip unfolds.
-        let direction = match self.config.side {
-            Side::Right => -1.0,
-            Side::Left => 1.0,
-        };
-        let center = rect.center();
-        painter.add(egui::Shape::line(
-            vec![
-                egui::pos2(center.x - direction * 2.0, center.y - 4.0),
-                egui::pos2(center.x + direction * 2.0, center.y),
-                egui::pos2(center.x - direction * 2.0, center.y + 4.0),
-            ],
-            egui::Stroke::new(1.4, visuals.weak_text_color()),
-        ));
-        if response.clicked() {
-            self.config.collapsed = false;
-            self.save();
-        }
-        if response.long_touched() {
-            self.settings_open = true;
-        }
-        if response.dragged() {
-            *drag_delta += response.drag_delta();
-        }
-        if response.drag_stopped() {
-            *drag_stopped = true;
-        }
-    }
-
-    fn expanded(&mut self, ui: &mut egui::Ui, drag_delta: &mut egui::Vec2, drag_stopped: &mut bool) {
-        let visuals = ui.visuals().clone();
-        egui::Frame::new()
-            .fill(visuals.window_fill)
-            .corner_radius(14.0)
-            .inner_margin(PAD_PAD)
-            .shadow(egui::epaint::Shadow {
-                offset: [0, 2],
                 blur: 10,
                 spread: 0,
                 color: egui::Color32::from_black_alpha(24),
-            })
-            .show(ui, |ui| {
-                ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
-                    // The gaps below are exact: egui's own item spacing would add to them.
-                    ui.spacing_mut().item_spacing.y = 0.0;
-                    self.top_bar(ui, drag_delta, drag_stopped);
-                    ui.add_space(4.0);
-                    for (index, key) in self.config.keys.iter().enumerate() {
-                        if index > 0 {
-                            ui.add_space(KEY_GAP);
-                        }
-                        if key_button(ui, key) {
-                            self.pending = Some(key.action.clone());
-                        }
-                    }
-                    ui.add_space(WHEEL_GAP);
-                    self.wheel(ui);
-                });
-            });
+            }
+            .as_shape(layout.card, 14.0),
+        );
+        painter.rect_filled(layout.card, 14.0, visuals.window_fill);
     }
 
-    /// The strip's top bar: the fold arrow and a drag grip.
-    fn top_bar(&mut self, ui: &mut egui::Ui, drag_delta: &mut egui::Vec2, drag_stopped: &mut bool) {
-        let (rect, response) = ui.allocate_exact_size(egui::vec2(KEY, BAR_H), egui::Sense::click_and_drag());
-        let visuals = ui.visuals().clone();
+    /// The strip's top bar: the fold arrow (which turns as the strip folds) and a drag grip.
+    fn draw_header(
+        &mut self,
+        ui: &mut egui::Ui,
+        layout: &Layout,
+        fold: f32,
+        drag_delta: &mut egui::Vec2,
+        drag_stopped: &mut bool,
+    ) {
+        let response = ui.interact(layout.header, ui.scope_id().with("weave-pad-header"), egui::Sense::click_and_drag());
+        let visuals = ui.visuals();
         let painter = ui.painter();
         let weak = visuals.weak_text_color();
         let direction = match self.config.side {
             Side::Right => 1.0,
             Side::Left => -1.0,
         };
-        // The fold arrow, pointing at the edge the strip folds into.
-        let center = egui::pos2(rect.left() + 9.0, rect.center().y);
+        let center = layout.header.center();
+        let angle = std::f32::consts::PI * fold;
+        let rotate = |point: egui::Pos2| center + egui::emath::Rot2::from_angle(angle) * (point - center);
+        let chevron = [
+            egui::pos2(center.x - direction * 1.5, center.y - 3.5),
+            egui::pos2(center.x + direction * 2.0, center.y),
+            egui::pos2(center.x - direction * 1.5, center.y + 3.5),
+        ];
         painter.add(egui::Shape::line(
-            vec![
-                egui::pos2(center.x - direction * 1.5, center.y - 3.5),
-                egui::pos2(center.x + direction * 2.0, center.y),
-                egui::pos2(center.x - direction * 1.5, center.y + 3.5),
-            ],
+            chevron.iter().map(|&point| rotate(point)).collect(),
             egui::Stroke::new(1.4, weak),
         ));
         // The grip: two columns of three dots.
@@ -288,7 +435,7 @@ impl Pad {
             for column in 0..2 {
                 painter.circle_filled(
                     egui::pos2(
-                        rect.right() - 12.0 + column as f32 * 3.5,
+                        layout.header.right() - 12.0 + column as f32 * 3.5,
                         center.y - 4.0 + row as f32 * 4.0,
                     ),
                     0.9,
@@ -297,7 +444,8 @@ impl Pad {
             }
         }
         if response.clicked() {
-            self.config.collapsed = true;
+            self.config.collapsed = !self.config.collapsed;
+            self.wheel_pinned = false;
             self.save();
         }
         if response.long_touched() {
@@ -311,73 +459,179 @@ impl Pad {
         }
     }
 
-    /// The wheel: a dial with ticks and a hub. Turning it runs its two actions, one step per
-    /// twelfth of a turn; holding it enlarges it.
-    fn wheel(&mut self, ui: &mut egui::Ui) {
-        let (rect, response) = ui.allocate_exact_size(egui::vec2(WHEEL_SIZE, WHEEL_SIZE), egui::Sense::click_and_drag());
-        let held = response.is_pointer_button_down_on();
-        if held {
-            // Keep frames coming while the wheel is held, so its enlargement can animate.
-            ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
-        }
-        let now = ui.input(|i| i.time);
-        if held {
-            self.wheel_held.get_or_insert(now);
-        } else {
-            self.wheel_held = None;
-        }
-        let long = self.wheel_held.is_some_and(|start| now - start > 0.25);
-        let scale = ui.ctx().animate_value_with_time(egui::Id::new("weave-pad-wheel-scale"), if long { 1.18 } else { 1.0 }, 0.15);
-        let center = rect.center();
-        let radius = 17.0 * scale;
-        let visuals = ui.visuals().clone();
+    /// The keys and the wheel, clipped to the card and faded as the strip folds.
+    fn draw_content(
+        &mut self,
+        ui: &mut egui::Ui,
+        layout: &Layout,
+        fold: f32,
+    ) -> (egui::Response, Vec<(egui::Rect, String, f32)>) {
+        let top = layout.header.bottom() + 2.0;
+        let bottom = (layout.card.bottom() - PAD_PAD).max(top);
+        let clip = egui::Rect::from_min_max(
+            egui::pos2(layout.card.left() + PAD_PAD, top),
+            egui::pos2(layout.card.right() - PAD_PAD, bottom),
+        );
+        let opacity = 1.0 - fold;
+        let scale = 1.0 - 0.05 * fold;
+        let lift = egui::vec2(0.0, -8.0 * fold);
+        ui.scope(|ui| {
+            ui.multiply_opacity(opacity);
+            ui.set_clip_rect(clip);
+            let mut tooltips = Vec::new();
+            for (index, key) in self.config.keys.iter().enumerate() {
+                let rect = shrink(layout.keys[index], scale).translate(lift);
+                let response = ui.interact(rect, ui.scope_id().with(("weave-pad-key", index)), egui::Sense::click());
+                let pressed = response.is_pointer_button_down_on();
+                let hovered = response.hovered();
+                let fill = key_fill(ui.visuals(), hovered, pressed);
+                let painter = ui.painter();
+                if fill != egui::Color32::TRANSPARENT {
+                    painter.rect_filled(rect, KEY_RADIUS, fill);
+                }
+                let color = if pressed || hovered {
+                    icon_color(ui.visuals()).gamma_multiply(0.72)
+                } else {
+                    icon_color(ui.visuals())
+                };
+                paint_icon(
+                    painter,
+                    egui::Rect::from_center_size(rect.center(), egui::Vec2::splat(ICON * scale)),
+                    &key.action,
+                    color,
+                );
+                let tip = ui.ctx().animate_bool_with_time(
+                    ui.scope_id().with(("weave-pad-tip", &key.label)),
+                    hovered,
+                    0.12,
+                );
+                if tip > 0.01 {
+                    tooltips.push((rect, key.label.clone(), tip));
+                }
+                if response.clicked() {
+                    self.pending = Some(key.action.clone());
+                }
+            }
+            // The wheel: a minimal ring until it is pressed.
+            let wheel_rect = shrink(layout.wheel, scale).translate(lift);
+            let response = ui.interact(wheel_rect, ui.scope_id().with("weave-pad-wheel"), egui::Sense::click_and_drag());
+            let pressed = response.is_pointer_button_down_on();
+            let hovered = response.hovered();
+            let fill = key_fill(ui.visuals(), hovered, pressed);
+            let painter = ui.painter();
+            if fill != egui::Color32::TRANSPARENT {
+                painter.circle_filled(wheel_rect.center(), WHEEL_SIZE / 2.0 * scale, fill);
+            }
+            draw_wheel(painter, wheel_rect, scale);
+            (response, tooltips)
+        })
+        .inner
+    }
+
+    /// The dial: a frosted white disc with an orange ring, rotating ticks, a progress arc and
+    /// the current zoom in its middle.
+    fn draw_dial(&self, ui: &egui::Ui, layout: &Layout, t: f32, zoom: Option<f32>) {
+        let radius = DIAL / 2.0 * t;
+        let center = match self.config.side {
+            Side::Left => egui::pos2(layout.card.left() + radius, layout.wheel.center().y),
+            Side::Right => egui::pos2(layout.card.right() - radius, layout.wheel.center().y),
+        };
+        let rect = egui::Rect::from_center_size(center, egui::Vec2::splat(radius * 2.0));
+        let alpha = t.clamp(0.0, 1.0);
+        let fade = |color: egui::Color32| color.gamma_multiply(alpha);
         let painter = ui.painter();
-        // A soft glow while the wheel is held.
-        if scale > 1.02 {
-            painter.circle_filled(center, radius + 6.0, egui::Color32::from_rgba_unmultiplied(59, 130, 246, 26));
-        }
-        // The dial: a light disc, a hairline ring, twelve ticks and a hub.
-        painter.circle_filled(center, radius, visuals.widgets.inactive.bg_fill);
-        painter.circle_stroke(center, radius, egui::Stroke::new(1.0, visuals.widgets.inactive.bg_stroke.color));
-        for i in 0..12 {
-            let angle = i as f32 * std::f32::consts::TAU / 12.0;
+        painter.add(
+            egui::epaint::Shadow {
+                offset: [0, 8],
+                blur: 24,
+                spread: 0,
+                color: egui::Color32::from_black_alpha((30.0 * alpha) as u8),
+            }
+            .as_shape(rect, radius),
+        );
+        painter.circle_filled(
+            center,
+            radius,
+            egui::Color32::from_rgba_unmultiplied(255, 255, 255, (242.0 * alpha) as u8),
+        );
+        painter.circle_stroke(center, radius - 0.75, egui::Stroke::new(1.5, fade(ACCENT)));
+        for i in 0..DIAL_TICKS {
+            let angle = i as f32 * std::f32::consts::TAU / DIAL_TICKS as f32 + self.wheel_turn;
             let direction = egui::vec2(angle.cos(), angle.sin());
             painter.line_segment(
-                [center + direction * (radius - 5.0), center + direction * (radius - 2.0)],
-                egui::Stroke::new(1.0, visuals.weak_text_color()),
+                [center + direction * (radius - 14.0), center + direction * (radius - 6.0)],
+                egui::Stroke::new(1.0, fade(ACCENT.gamma_multiply(0.55))),
             );
         }
-        painter.circle_filled(center, radius - 7.0, visuals.window_fill);
-        painter.circle_stroke(center, radius - 7.0, egui::Stroke::new(1.0, visuals.widgets.inactive.bg_stroke.color));
-        painter.circle_filled(center, 4.0 * scale, visuals.selection.bg_fill);
-        painter.circle_filled(center, 1.5 * scale, visuals.window_fill);
-        // Turning: the angle from the hub to the pointer, one step per twelfth of a turn.
-        if response.dragged() {
-            if let Some(pointer) = response.interact_pointer_pos() {
-                let angle = (pointer.y - center.y).atan2(pointer.x - center.x);
-                if let Some(last) = self.wheel_angle {
-                    let mut delta = angle - last;
-                    while delta > std::f32::consts::PI {
-                        delta -= std::f32::consts::TAU;
-                    }
-                    while delta < -std::f32::consts::PI {
-                        delta += std::f32::consts::TAU;
-                    }
-                    self.wheel_turn += delta;
-                    while self.wheel_turn >= WHEEL_STEP {
-                        self.wheel_turn -= WHEEL_STEP;
-                        self.pending = Some(self.config.wheel.down.clone());
-                    }
-                    while self.wheel_turn <= -WHEEL_STEP {
-                        self.wheel_turn += WHEEL_STEP;
-                        self.pending = Some(self.config.wheel.up.clone());
-                    }
-                }
-                self.wheel_angle = Some(angle);
-            }
-        } else {
-            self.wheel_angle = None;
+        // The progress arc: from the top, as far as the dial has been turned.
+        let sweep = self.wheel_turn.clamp(-std::f32::consts::TAU, std::f32::consts::TAU);
+        if sweep.abs() > 0.02 {
+            let start = -std::f32::consts::FRAC_PI_2;
+            let steps = 48;
+            let points: Vec<egui::Pos2> = (0..=steps)
+                .map(|i| {
+                    let angle = start + sweep * i as f32 / steps as f32;
+                    center + egui::vec2(angle.cos(), angle.sin()) * (radius - 0.75)
+                })
+                .collect();
+            painter.add(egui::Shape::line(points, egui::Stroke::new(3.0, fade(ACCENT))));
+            let end = start + sweep;
+            let dot = center + egui::vec2(end.cos(), end.sin()) * (radius - 0.75);
+            painter.circle_filled(dot, 5.0, fade(ACCENT));
+            painter.circle_filled(dot, 2.0, fade(egui::Color32::WHITE));
         }
+        painter.text(
+            center + egui::vec2(0.0, -10.0),
+            egui::Align2::CENTER_CENTER,
+            self.wheel_label(),
+            egui::FontId::proportional(12.0),
+            fade(DIAL_LABEL),
+        );
+        let value = zoom.map(|zoom| format!("{zoom:.0}%")).unwrap_or_else(|| "—".to_owned());
+        painter.text(
+            center + egui::vec2(0.0, 10.0),
+            egui::Align2::CENTER_CENTER,
+            value,
+            egui::FontId::proportional(17.0),
+            fade(DIAL_VALUE),
+        );
+    }
+
+    /// The dial's name: "Zoom" when its actions zoom, "Dial" otherwise.
+    fn wheel_label(&self) -> &'static str {
+        let up = self.config.wheel.up.as_str();
+        let down = self.config.wheel.down.as_str();
+        if up.contains("zoom") || down.contains("zoom") {
+            "Zoom"
+        } else {
+            "Dial"
+        }
+    }
+
+    /// Turn the dial: the pointer's angle around its middle, one step per twelfth of a turn.
+    fn turn(&mut self, pointer: egui::Pos2, center: egui::Pos2) {
+        let angle = (pointer.y - center.y).atan2(pointer.x - center.x);
+        if let Some(last) = self.wheel_angle {
+            let mut delta = angle - last;
+            while delta > std::f32::consts::PI {
+                delta -= std::f32::consts::TAU;
+            }
+            while delta < -std::f32::consts::PI {
+                delta += std::f32::consts::TAU;
+            }
+            self.wheel_turn += delta;
+            self.wheel_step += delta;
+            // Clockwise turns up (zoom in), counter-clockwise down.
+            while self.wheel_step >= WHEEL_STEP {
+                self.wheel_step -= WHEEL_STEP;
+                self.pending = Some(self.config.wheel.up.clone());
+            }
+            while self.wheel_step <= -WHEEL_STEP {
+                self.wheel_step += WHEEL_STEP;
+                self.pending = Some(self.config.wheel.down.clone());
+            }
+        }
+        self.wheel_angle = Some(angle);
     }
 
     fn settings_window(&mut self, ctx: &egui::Context) {
@@ -443,49 +697,25 @@ impl Pad {
     }
 }
 
-/// One key: a compact square that only shows a fill while it is hovered or pressed, with a
-/// Lucide-style line icon and its name in a tooltip to the right.
-fn key_button(ui: &mut egui::Ui, key: &KeyConfig) -> bool {
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(KEY, KEY), egui::Sense::click());
-    let pressed = response.is_pointer_button_down_on();
-    let hovered = response.hovered();
-    if pressed {
-        // Keep frames coming while the key is held, so the long-press tooltip can appear.
-        ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
+/// Shrink a rect around its middle.
+fn shrink(rect: egui::Rect, scale: f32) -> egui::Rect {
+    egui::Rect::from_center_size(rect.center(), rect.size() * scale)
+}
+
+/// The wheel at rest: a hairline ring, twelve short ticks and a small hollow hub.
+fn draw_wheel(painter: &egui::Painter, rect: egui::Rect, scale: f32) {
+    let center = rect.center();
+    let radius = WHEEL_SIZE / 2.0 * scale - 1.0;
+    painter.circle_stroke(center, radius, egui::Stroke::new(1.0, RING));
+    for i in 0..12 {
+        let angle = i as f32 * std::f32::consts::TAU / 12.0;
+        let direction = egui::vec2(angle.cos(), angle.sin());
+        painter.line_segment(
+            [center + direction * (radius - 4.0), center + direction * (radius - 1.0)],
+            egui::Stroke::new(1.0, TICK),
+        );
     }
-    // A long press shows the name too, so the pad stays usable without a mouse.
-    let now = ui.input(|i| i.time);
-    let hold_id = ui.id().with(("weave-pad-hold", &key.label));
-    let held_since = ui.ctx().memory_mut(|memory| {
-        let start = memory.data.get_temp_mut_or_insert_with(hold_id, || now);
-        if !pressed {
-            *start = now;
-        }
-        *start
-    });
-    let long = pressed && now - held_since > 0.45;
-    let visuals = ui.visuals().clone();
-    let fill = key_fill(&visuals, hovered, pressed);
-    let painter = ui.painter();
-    if fill != egui::Color32::TRANSPARENT {
-        painter.rect_filled(rect, KEY_RADIUS, fill);
-    }
-    let color = if pressed || hovered {
-        icon_color(&visuals).gamma_multiply(0.72)
-    } else {
-        icon_color(&visuals)
-    };
-    paint_icon(
-        painter,
-        egui::Rect::from_center_size(rect.center(), egui::Vec2::splat(ICON)),
-        &key.action,
-        color,
-    );
-    let tip = ui.ctx().animate_bool_with_time(ui.id().with(("weave-pad-tip", &key.label)), hovered || long, 0.12);
-    if tip > 0.01 {
-        paint_tooltip(ui, rect, &key.label, tip);
-    }
-    response.clicked()
+    painter.circle_stroke(center, 2.0 * scale, egui::Stroke::new(1.2, ICON_COLOR));
 }
 
 /// The key's fill: nothing at rest, a light grey on hover, a darker one while pressed.

@@ -18,7 +18,7 @@
 | Vendored dependency stubs | `vendor/rfd` and `vendor/arboard` add the Android backends upstream lacks (dialogs cancelled, clipboard unsupported), patched in `Cargo.toml` |
 | **SAF bridge** | `src/bridge.rs` + `WeaveOfficeActivity`: Open/Save through Android's document pickers; picked documents are copied into `bridge/inbox/<id>/`, saves write `bridge/out/<id>/` and the Activity copies them back to the document (polled, once per write) |
 | **IME bridge** | `src/ime.rs` + the Shell wrapper: the keyboard's text state is polled each frame and replayed as egui Text/Backspace/Enter events (the action key arrives as a newline); the keyboard is put away when focus leaves |
-| **Shortcut Pad** | `src/pad.rs`: a light card on either edge with 2–10 compact 36 pt square keys (6 pt apart, 8 pt padding) and a dial. The keys carry Lucide-style 18 pt line icons (1.75 pt stroke, round caps, #4B5563) and show their names in a tooltip on hover or a long press. Keys run host commands (`edit.undo`, `file.save`) or editor commands (`view.zoomIn`); the dial turns two more, one step per twelfth of a turn, and grows while held. It folds away with its arrow (a thin handle stays at the edge), drags to either edge and snaps there, and a long-press on the arrow opens its settings (`shortcut-pad.json`) |
+| **Shortcut Pad** | `src/pad.rs`: a light card on either edge with 2–10 compact 36 pt square keys (6 pt apart, 8 pt padding) and a wheel. The keys carry Lucide-style 18 pt line icons (1.75 pt stroke, round caps, #4B5563) and show their names in a tooltip on hover or a long press. At rest the wheel is a minimal 36 pt ring (hairline #E5E7EB, twelve 3 pt ticks, a 4 pt hollow hub); pressing it opens a 172 pt dial anchored at the strip's edge — frosted white, an orange ring and 36 rotating ticks, a progress arc with a cursor dot, and the active document's zoom in the middle. Turning it runs the wheel's two actions, one step per twelfth of a turn. The strip folds with a height/opacity animation (the arrow turns 180°), drags to either edge and snaps there, and a long-press on the arrow opens its settings (`shortcut-pad.json`) |
 | **Touch scrolling** | `src/touch.rs`: two fingers' movement becomes the wheel events winit's Android backend never emits; the pointer egui-winit made from the first finger is dropped while scrolling |
 | **Open with / Share** | The Activity accepts `ACTION_VIEW`/`ACTION_SEND` for docx/xlsx/pptx/pdf/md/txt, copies the document into `bridge/incoming/`, and the shell moves it to `bridge/documents/` and opens it once (`WeaveApp::open_external`) |
 | **Phone layout** | A phone-class screen (smallest side under 600 pt) gets the interface at 75% |
@@ -43,7 +43,9 @@ The APK was installed and run on an Android 15 (API 35) arm64 emulator (SwiftSha
 
 The Shortcut Pad sits against the window's edge and its keys work: Undo with no document opens
 the host's "open a file first" dialog, a long press on a key shows its name, and a long press on
-the fold arrow opens the pad's settings ([pad-settings.png](images/pad-settings.png)).
+the fold arrow opens the pad's settings ([pad-settings.png](images/pad-settings.png)). Pressing
+the wheel opens the dial with the document's zoom in its middle and an orange progress arc that
+follows the turn ([pad-dial.png](images/pad-dial.png)).
 
 ## Next
 

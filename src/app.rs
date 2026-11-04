@@ -198,6 +198,25 @@ impl WeaveApp {
             _ => self.dispatch_requests(ctx, vec![(id.to_owned(), params)]),
         }
     }
+    /// The active document's zoom as a percentage (100 = 100%), for the Android Shortcut
+    /// Pad's dial. `None` when the document has no zoom (text and rich-text files).
+    pub fn zoom_percent(&self) -> Option<f32> {
+        use crate::editor::Editor;
+        let document = self.host.active()?;
+        match &document.editor {
+            Editor::Word(word) => Some(word.session.view.zoom * 100.0),
+            Editor::Sheet(sheet) => {
+                let doc = sheet.session.active()?;
+                Some(doc.wb.active()?.zoom as f32)
+            }
+            Editor::Slides(slides) => slides.ui.zoom.map(|zoom| zoom * 100.0),
+            Editor::Pdf(pdf) => {
+                let view = pdf.views.get(pdf.active?)?;
+                Some(view.zoom * 100.0)
+            }
+            Editor::TextFile(_) | Editor::Rich(_) => None,
+        }
+    }
     /// Open a document another app sent (Android's "Open with" / "Share").
     pub fn open_external(&mut self, path: PathBuf) {
         self.actions.push_back(Action::OpenExternal(path));
