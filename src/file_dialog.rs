@@ -56,6 +56,7 @@ impl FileDialog {
     /// Call on the UI/main thread. rfd's synchronous macOS implementation runs
     /// NSSavePanel/NSOpenPanel's modal loop here, so native editing shortcuts and
     /// the app's AppleEvent quit handler continue to use the main run loop.
+    #[cfg(not(target_os = "android"))]
     pub fn show(&mut self, ctx: &egui::Context) -> Option<FileDialogResult> {
         if self.error.is_some() {
             return self.show_error(ctx);
@@ -75,6 +76,22 @@ impl FileDialog {
         Some(self.receive_native_result(paths))
     }
 
+    /// Android: the system pickers are asynchronous and live in the Activity, which answers
+    /// through the SAF bridge. Until that bridge is wired, a dialog is cancelled.
+    #[cfg(target_os = "android")]
+    pub fn show(&mut self, ctx: &egui::Context) -> Option<FileDialogResult> {
+        if self.error.is_some() {
+            return self.show_error(ctx);
+        }
+        if !self.native_pending {
+            return None;
+        }
+        self.native_pending = false;
+        ctx.request_repaint();
+        Some(FileDialogResult::Cancelled)
+    }
+
+    #[cfg(not(target_os = "android"))]
     fn native_dialog(&self) -> rfd::FileDialog {
         let mut dialog = rfd::FileDialog::new();
         if !self.options.title.is_empty() {

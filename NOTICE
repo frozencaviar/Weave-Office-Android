@@ -1,0 +1,20 @@
+Weave Office Android
+====================
+
+This repository is a fork of Weave Office (https://github.com/Jamailar/Weave-Office), MIT,
+pinned at f3054c51677cacab7e4ba945d50f7a45b2fd6ae2.
+
+The Android port in apps/weave-office-android/ is an unofficial community port, not made or
+supported by the Weave Office developers.
+
+It follows the ArtCraft Android set's five-layer adaptation stack, whose architecture model is
+morte2437/photocraft-android (https://github.com/morte2437/photocraft-android, MIT OR Apache-2.0)
+and whose build scripts are adapted from kanaaka/shared-android-port
+(https://github.com/kanaaka/shared-android-port, MIT, Copyright (c) 2026 kanaaka).
+
+The vendored rfd (https://github.com/PolyMeilex/rfd, MIT) and arboard
+(https://github.com/1Password/arboard, MIT OR Apache-2.0) copies add Android stubs only; their
+upstream code is unchanged.
+
+No artwork from any of these projects is included: the launcher icon is Weave Office's own
+(assets/app-icon/weave-office-256.png).

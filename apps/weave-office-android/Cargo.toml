@@ -1,0 +1,22 @@
+[package]
+name = "weave-office-android"
+version = "0.1.1"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[lib]
+name = "weave_office_android"
+# cdylib: the libweave_office_android.so GameActivity loads; rlib: host unit tests.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+weave-office = { path = "../.." }
+log = "0.4"
+
+[target.'cfg(target_os = "android")'.dependencies]
+# The Android shell renders through wgpu (Vulkan, GLES fallback) on winit's GameActivity
+# backend; the desktop keeps eframe's glow renderer.
+eframe = { version = "0.37", default-features = false, features = ["default_fonts", "wgpu", "clipboard", "links", "accesskit", "android-game-activity"] }
+android_logger = "0.15"
+winit = { version = "0.30", features = ["android-game-activity"] }

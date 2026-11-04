@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Fullscreen with no title bar: the app draws its own chrome, and the workspace goes edge
+         to edge (the Activity also hides the system bars and draws under a camera cutout). -->
+    <style name="Theme.WeaveOffice" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowBackground">@android:color/black</item>
+        <item name="android:windowFullscreen">true</item>
+    </style>
+</resources>

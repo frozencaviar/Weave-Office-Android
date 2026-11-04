@@ -7,7 +7,7 @@ description = "Unified desktop workspace for documents, spreadsheets, presentati
 license = "MIT"
 
 [workspace]
-members = ["crates/workspace", "crates/cli", "crates/pdf-backend", "crates/font-assets", "crates/system-fonts", "crates/ribbon", "crates/text-editor", "crates/rich-editor"]
+members = ["crates/workspace", "crates/cli", "crates/pdf-backend", "crates/font-assets", "crates/system-fonts", "crates/ribbon", "crates/text-editor", "crates/rich-editor", "apps/weave-office-android"]
 exclude = ["integration", "vendor/wordcraft", "vendor/gridcraft", "vendor/deckcraft", "vendor/pdfcraft"]
 resolver = "2"
 
@@ -17,8 +17,6 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 skrifa = "0.44"
 tempfile = "3"
-arboard = "3.7"
-rfd = "0.17.2"
 weave-workspace = { path = "crates/workspace" }
 # `weave-office <verb> …`: the command line over the same engines (create, view, run, batch …).
 weave-cli = { path = "crates/cli" }
@@ -50,6 +48,16 @@ pdfcraft-print = { path = "vendor/pdfcraft/crates/print" }
 pdfcraft-platform = { path = "vendor/pdfcraft/crates/platform" }
 craft-quit = { git = "https://github.com/storytold/craft-libs", rev = "c5a1cbfb5f9049f9270955caffb5bee5997aebf7", features = ["egui"] }
 
+[target.'cfg(not(target_os = "android"))'.dependencies]
+# Native file panels and the system clipboard: on Android the shell answers both through its
+# bridges (SAF pickers, JNI clipboard), so neither crate is built there.
+arboard = "3.7"
+rfd = "0.17.2"
+
+[target.'cfg(target_os = "android")'.dependencies]
+# The Android shell runs eframe on winit's GameActivity backend; the desktop keeps glow.
+eframe = { version = "0.37", default-features = false, features = ["android-game-activity"] }
+
 [target.'cfg(target_os = "macos")'.dependencies]
 fmv-macos-events = "=0.1.0"
 winit = { version = "0.30", default-features = false }
@@ -66,6 +74,10 @@ name = "native_app_menu"
 harness = false
 
 [patch.crates-io]
+# Android stubs: rfd and arboard have no Android backend upstream; the vendored copies add one
+# (dialogs cancelled, clipboard unsupported) so the shared crates compile for the target.
+rfd = { path = "vendor/rfd" }
+arboard = { path = "vendor/arboard" }
 hayro-interpret = { path = "vendor/pdfcraft/vendor/hayro-interpret" }
 hayro = { path = "vendor/pdfcraft/vendor/hayro" }
 hayro-syntax = { path = "vendor/pdfcraft/vendor/hayro-syntax" }

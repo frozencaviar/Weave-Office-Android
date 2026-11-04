@@ -15,6 +15,7 @@ pub struct Clipboard(Rc<RefCell<State>>);
 
 #[derive(Default)]
 struct State {
+    #[cfg(not(target_os = "android"))]
     system: Option<arboard::Clipboard>,
     copy: Option<Copy>,
     sheet_transfers: Vec<crate::sheet_transfer::Request>,
@@ -343,6 +344,7 @@ impl Clipboard {
 }
 
 impl State {
+    #[cfg(not(target_os = "android"))]
     fn system(&mut self) -> Option<&mut arboard::Clipboard> {
         if self.system.is_none() {
             self.system = arboard::Clipboard::new().ok();
@@ -381,7 +383,14 @@ impl State {
         if let Some(memory) = &self.memory {
             return memory.text.clone();
         }
-        self.system()?.get_text().ok()
+        #[cfg(not(target_os = "android"))]
+        {
+            self.system()?.get_text().ok()
+        }
+        #[cfg(target_os = "android")]
+        {
+            None
+        }
     }
 
     fn html(&mut self) -> Option<String> {
@@ -389,7 +398,14 @@ impl State {
         if let Some(memory) = &self.memory {
             return memory.html.clone();
         }
-        self.system()?.get().html().ok()
+        #[cfg(not(target_os = "android"))]
+        {
+            self.system()?.get().html().ok()
+        }
+        #[cfg(target_os = "android")]
+        {
+            None
+        }
     }
 
     fn write(&mut self, html: &str, text: &str, mathml: &str) -> Result<Option<i64>, String> {
@@ -413,7 +429,13 @@ impl State {
             )
             .map(Some)
         }
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(target_os = "android")]
+        {
+            // The JNI clipboard bridge is a later layer; in-app copies still work.
+            let _ = (html, text, mathml);
+            Ok(None)
+        }
+        #[cfg(all(not(target_os = "macos"), not(target_os = "android")))]
         {
             let _ = mathml;
             let clipboard = self.system().ok_or("无法访问系统剪贴板")?;
