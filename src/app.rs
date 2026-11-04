@@ -184,9 +184,9 @@ impl WeaveApp {
         }
     }
     /// Run one command from a platform shell (the Android Shortcut Pad): a host command
-    /// (`edit.undo`, `file.save`, `file.print`) or an editor command (`view.zoomIn`).
-    pub fn run_shell_command(&mut self, ctx: &egui::Context, id: &str) {
-        let params = serde_json::json!({});
+    /// (`edit.undo`, `file.save`, `file.print`) or an editor command (`view.zoomIn`,
+    /// `view.zoom` with a percentage).
+    pub fn run_shell_command(&mut self, ctx: &egui::Context, id: &str, params: serde_json::Value) {
         match commands::classify(id, &params) {
             HostRequest::Unsupported { .. } => {
                 if let Some(document) = self.host.active_mut() {

@@ -198,14 +198,18 @@ pub struct Pad {
     config: PadConfig,
     path: PathBuf,
     settings_open: bool,
-    /// The action a key or the dial asked for, run on the next frame.
-    pending: Option<String>,
+    /// The action a key or the dial asked for, with its parameters, run on the next frame.
+    pending: Option<(String, serde_json::Value)>,
     /// The pointer's last angle while the dial is being turned.
     wheel_angle: Option<f32>,
     /// The rotation since the dial opened, for its arc and ticks.
     wheel_turn: f32,
     /// The rotation since the last step, which runs the wheel's actions.
     wheel_step: f32,
+    /// The zoom the dial started from: a zoom wheel then follows the turn continuously.
+    dial_base_zoom: Option<f32>,
+    /// The zoom last asked for, so the dial only sends a command when it moves.
+    last_zoom: f32,
     /// The wheel is held down.
     wheel_pressed: bool,
     /// The dial stays open after a tap.
@@ -234,6 +238,8 @@ impl Pad {
             wheel_angle: None,
             wheel_turn: 0.0,
             wheel_step: 0.0,
+            dial_base_zoom: None,
+            last_zoom: 100.0,
             wheel_pressed: false,
             wheel_pinned: false,
             fold: Anim::new(if collapsed { 1.0 } else { 0.0 }),
@@ -248,8 +254,9 @@ impl Pad {
         }
     }
 
-    /// The action a key or the dial asked for, if any (the shell dispatches it).
-    pub fn take_pending(&mut self) -> Option<String> {
+    /// The action a key or the dial asked for, with its parameters, if any (the shell
+    /// dispatches it).
+    pub fn take_pending(&mut self) -> Option<(String, serde_json::Value)> {
         self.pending.take()
     }
 
@@ -266,10 +273,16 @@ impl Pad {
         let active = self.wheel_pinned || self.wheel_pressed;
         self.dial.set(if active { 1.0 } else { 0.0 }, now, DIAL_TIME, DIAL_CURVE);
         let dial_t = self.dial.update(now);
+        if active && self.dial_base_zoom.is_none() {
+            // A zoom wheel follows the turn from the zoom the dial opened at.
+            self.dial_base_zoom = zoom;
+            self.last_zoom = zoom.unwrap_or(100.0);
+        }
         if !active && dial_t < 0.01 {
             self.wheel_turn = 0.0;
             self.wheel_step = 0.0;
             self.wheel_angle = None;
+            self.dial_base_zoom = None;
         }
 
         let expanded_h = self.estimated_height();
@@ -509,7 +522,7 @@ impl Pad {
                     tooltips.push((rect, key.label.clone(), tip));
                 }
                 if response.clicked() {
-                    self.pending = Some(key.action.clone());
+                    self.pending = Some((key.action.clone(), serde_json::json!({})));
                 }
             }
             // The wheel: a minimal ring until it is pressed.
@@ -608,7 +621,9 @@ impl Pad {
         }
     }
 
-    /// Turn the dial: the pointer's angle around its middle, one step per twelfth of a turn.
+    /// Turn the dial: the pointer's angle around its middle. A zoom wheel follows the turn
+    /// continuously (a full turn doubles the zoom, like spreading two fingers); any other wheel
+    /// runs one step per twelfth of a turn.
     fn turn(&mut self, pointer: egui::Pos2, center: egui::Pos2) {
         let angle = (pointer.y - center.y).atan2(pointer.x - center.x);
         if let Some(last) = self.wheel_angle {
@@ -620,15 +635,26 @@ impl Pad {
                 delta += std::f32::consts::TAU;
             }
             self.wheel_turn += delta;
-            self.wheel_step += delta;
-            // Clockwise turns up (zoom in), counter-clockwise down.
-            while self.wheel_step >= WHEEL_STEP {
-                self.wheel_step -= WHEEL_STEP;
-                self.pending = Some(self.config.wheel.up.clone());
-            }
-            while self.wheel_step <= -WHEEL_STEP {
-                self.wheel_step += WHEEL_STEP;
-                self.pending = Some(self.config.wheel.down.clone());
+            if let Some(base) = self.dial_base_zoom {
+                let target = (base * (self.wheel_turn / std::f32::consts::TAU).exp2()).clamp(10.0, 500.0);
+                if (target - self.last_zoom).abs() > 0.5 {
+                    self.last_zoom = target;
+                    self.pending = Some((
+                        "view.zoom".into(),
+                        serde_json::json!({"value": target, "percent": target}),
+                    ));
+                }
+            } else {
+                self.wheel_step += delta;
+                // Clockwise turns up (zoom in), counter-clockwise down.
+                while self.wheel_step >= WHEEL_STEP {
+                    self.wheel_step -= WHEEL_STEP;
+                    self.pending = Some((self.config.wheel.up.clone(), serde_json::json!({})));
+                }
+                while self.wheel_step <= -WHEEL_STEP {
+                    self.wheel_step += WHEEL_STEP;
+                    self.pending = Some((self.config.wheel.down.clone(), serde_json::json!({})));
+                }
             }
         }
         self.wheel_angle = Some(angle);
