@@ -36,8 +36,8 @@ const BAR_H: f32 = 20.0;
 const EDGE: f32 = 8.0;
 const WHEEL_GAP: f32 = 10.0;
 
-/// The dial that opens from the wheel: 172 pt across, anchored at the strip's edge.
-const DIAL: f32 = 172.0;
+/// The dial that opens from the wheel: 150 pt across, anchored at the strip's edge.
+const DIAL: f32 = 150.0;
 const DIAL_TICKS: usize = 36;
 const ACCENT: egui::Color32 = egui::Color32::from_rgb(0xF5, 0x9E, 0x0B);
 const DIAL_LABEL: egui::Color32 = egui::Color32::from_rgb(0x6B, 0x72, 0x80);
@@ -575,23 +575,6 @@ impl Pad {
                 [center + direction * (radius - 14.0), center + direction * (radius - 6.0)],
                 egui::Stroke::new(1.0, fade(ACCENT.gamma_multiply(0.55))),
             );
-        }
-        // The progress arc: from the top, as far as the dial has been turned.
-        let sweep = self.wheel_turn.clamp(-std::f32::consts::TAU, std::f32::consts::TAU);
-        if sweep.abs() > 0.02 {
-            let start = -std::f32::consts::FRAC_PI_2;
-            let steps = 48;
-            let points: Vec<egui::Pos2> = (0..=steps)
-                .map(|i| {
-                    let angle = start + sweep * i as f32 / steps as f32;
-                    center + egui::vec2(angle.cos(), angle.sin()) * (radius - 0.75)
-                })
-                .collect();
-            painter.add(egui::Shape::line(points, egui::Stroke::new(3.0, fade(ACCENT))));
-            let end = start + sweep;
-            let dot = center + egui::vec2(end.cos(), end.sin()) * (radius - 0.75);
-            painter.circle_filled(dot, 5.0, fade(ACCENT));
-            painter.circle_filled(dot, 2.0, fade(egui::Color32::WHITE));
         }
         painter.text(
             center + egui::vec2(0.0, -10.0),
