@@ -34,6 +34,21 @@
 > [!NOTE]
 > Weave Office is under active development and is not yet a day-to-day replacement for a mature office suite. Fidelity on complex documents, input methods and some advanced workflows are still being polished. See the [acceptance log](docs/acceptance.md) (Chinese) for current status and known issues.
 
+## Android
+
+An **unofficial community port** runs Weave Office on Android tablets and phones: the same
+workspace (documents, spreadsheets, presentations, PDF, Markdown, code) in an arm64-v8a APK for
+Android 8.0 (API 26) and newer. It is a prototype, not made or supported by the Weave Office
+developers.
+
+It adds what a tablet needs: Android's document pickers for opening and saving files, "Open with"
+and "Share", the soft keyboard, the system clipboard, a Shortcut Pad of touch keys and a wheel,
+two-finger scrolling, a phone layout, printing through Android's print service, and a self-updater
+from GitHub releases.
+
+Build it with `apps/weave-office-android/build.sh`; [docs/android/](docs/android/) has the
+details.
+
 ## Why Weave Office
 
 Two things set it apart: it is **all-in-one**, and it is **AI-friendly**.
