@@ -20,13 +20,13 @@ def appVersionName = "${cargoVersion[1]}.${cargoVersion[2]}.${cargoVersion[3]}" 
 def appVersionCode = cargoVersion[1].toInteger() * 10000 + cargoVersion[2].toInteger() * 100 + cargoVersion[3].toInteger()
 
 android {
-    namespace 'local.weaveoffice.android'
+    namespace 'io.github.frozencaviar.weaveoffice'
     compileSdk 35
     // Pinned, so the build uses the build-tools the SDK has rather than AGP's default (34.0.0).
     buildToolsVersion '35.0.0'
 
     defaultConfig {
-        applicationId 'local.weaveoffice.android'
+        applicationId 'io.github.frozencaviar.weaveoffice'
         minSdk 26
         targetSdk 35
         versionCode appVersionCode

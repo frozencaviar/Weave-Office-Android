@@ -1,4 +1,4 @@
-package local.weaveoffice.android;
+package io.github.frozencaviar.weaveoffice;
 
 import android.app.Activity;
 import android.app.AlertDialog;
@@ -61,7 +61,7 @@ final class Updater {
     private static final String API = "https://api.github.com/repos/" + REPO + "/releases?per_page=20";
     private static final Pattern TAG_VERSION = Pattern.compile("^android-v(\\d+)\\.(\\d+)\\.(\\d+)(?:-(\\d+))?$");
     private static final Pattern NAME_VERSION = Pattern.compile("^(\\d+)\\.(\\d+)\\.(\\d+)(?:-(\\d+))?");
-    private static final String INSTALL_ACTION = "local.weaveoffice.android.UPDATE_INSTALLED";
+    private static final String INSTALL_ACTION = "io.github.frozencaviar.weaveoffice.UPDATE_INSTALLED";
 
     private final Activity activity;
     private final File filesDir;

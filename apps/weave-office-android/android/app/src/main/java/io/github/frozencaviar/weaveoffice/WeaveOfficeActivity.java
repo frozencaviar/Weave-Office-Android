@@ -1,4 +1,4 @@
-package local.weaveoffice.android;
+package io.github.frozencaviar.weaveoffice;
 
 import android.app.Activity;
 import android.content.ActivityNotFoundException;
