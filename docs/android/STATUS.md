@@ -40,8 +40,9 @@ The APK was installed and run on an Android 15 (API 35) arm64 emulator (SwiftSha
 - wgpu picks Vulkan (SwiftShader) with the GL fallback available; the logcat says which adapter
   it got.
 
-Known issue: the Shortcut Pad's position and input need fixing — it draws inside the app's
-content area rather than at the window's edge, and taps in its strip reach the canvas.
+The Shortcut Pad sits against the window's right edge and its keys work: Undo with no document
+opens the host's "open a file first" dialog, and the gear opens the pad's settings
+([pad-settings.png](images/pad-settings.png)).
 
 ## Next
 

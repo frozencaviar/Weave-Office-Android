@@ -66,6 +66,8 @@ pub struct Pad {
     pending: Option<String>,
     /// The wheel's drag since it last ran a step.
     wheel_drag: f32,
+    /// The strip's size as of the last frame, so the next frame can place it against the edge.
+    last_size: Option<egui::Vec2>,
 }
 
 impl Pad {
@@ -75,7 +77,7 @@ impl Pad {
             .ok()
             .and_then(|bytes| serde_json::from_slice(&bytes).ok())
             .unwrap_or_default();
-        Self { config, path, settings_open: false, pending: None, wheel_drag: 0.0 }
+        Self { config, path, settings_open: false, pending: None, wheel_drag: 0.0, last_size: None }
     }
 
     fn save(&self) {
@@ -94,12 +96,19 @@ impl Pad {
         if !self.config.visible {
             return;
         }
-        let (anchor, offset) = match self.config.side {
-            Side::Left => (egui::Align2::LEFT_CENTER, egui::vec2(8.0, 0.0)),
-            Side::Right => (egui::Align2::RIGHT_CENTER, egui::vec2(-8.0, 0.0)),
+        // Place the strip against the window's edge. The area's own size is only known after
+        // its first frame, so the first frame uses an estimate and the next ones the real size.
+        let content = ctx.content_rect();
+        let size = self.last_size.unwrap_or(egui::vec2(70.0, 300.0));
+        let pos = match self.config.side {
+            Side::Left => egui::pos2(content.left() + 8.0, content.center().y - size.y / 2.0),
+            Side::Right => egui::pos2(content.right() - 8.0 - size.x, content.center().y - size.y / 2.0),
         };
-        egui::Area::new(egui::Id::new("weave-shortcut-pad"))
-            .anchor(anchor, offset)
+        let response = egui::Area::new(egui::Id::new("weave-shortcut-pad"))
+            .fixed_pos(pos)
+            // The strip is placed against the window's edge by hand; egui's own constraint
+            // would move it back inside the content rect on the first (sizing) frame.
+            .constrain(false)
             .order(egui::Order::Foreground)
             .show(ctx, |ui| {
                 egui::Frame::new()
@@ -131,6 +140,7 @@ impl Pad {
                         });
                     });
             });
+        self.last_size = Some(response.response.rect.size());
         self.settings_window(ctx);
     }
 

@@ -205,6 +205,12 @@ impl eframe::App for Shell {
         if !self.layout_checked {
             self.layout_checked = true;
             let screen = ctx.viewport_rect();
+            log::info!(
+                "layout: ppp={} viewport={:?} content={:?}",
+                ctx.pixels_per_point(),
+                ctx.viewport_rect(),
+                ctx.content_rect()
+            );
             if screen.width().min(screen.height()) < 600.0 {
                 ctx.set_zoom_factor(0.75);
             }
