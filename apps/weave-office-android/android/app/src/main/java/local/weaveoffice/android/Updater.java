@@ -1,0 +1,406 @@
+package local.weaveoffice.android;
+
+import android.app.Activity;
+import android.app.AlertDialog;
+import android.app.PendingIntent;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.content.SharedPreferences;
+import android.content.pm.PackageInstaller;
+import android.net.Uri;
+import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
+import android.provider.Settings;
+import android.util.Log;
+import android.widget.ProgressBar;
+import android.widget.Toast;
+
+import androidx.core.content.ContextCompat;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+/**
+ * Updates from the fork's GitHub releases.
+ *
+ * <p>Releases are tagged {@code android-v<major>.<minor>.<patch>[-<build>]} (pre-releases
+ * included) with the APK attached. At startup (unless Help › Check for Updates at Startup is
+ * off) and from Help › Check for Updates…, the newest such release is compared with this build's
+ * version name ({@code 0.21.0-3-android}); when it is newer, a dialog offers to install it, wait,
+ * or skip that version. Installing downloads the APK into the cache and hands it to Android's
+ * package installer, which asks the user to confirm (and, the first time, to allow Weave Office to
+ * install apps). Updates only install when they are signed with the same key as this build.
+ */
+final class Updater {
+    private static final String TAG = "WeaveOffice";
+    /**
+     * The repository whose releases are the updates.
+     *
+     * <p>PLACEHOLDER: change this to wherever the APK is published. The releases must be tagged
+     * {@code android-v<version>[-<build>]} with the APK attached (see build.sh).
+     */
+    static final String REPO = "Jamailar/Weave-Office";
+    private static final String API = "https://api.github.com/repos/" + REPO + "/releases?per_page=20";
+    private static final Pattern TAG_VERSION = Pattern.compile("^android-v(\\d+)\\.(\\d+)\\.(\\d+)(?:-(\\d+))?$");
+    private static final Pattern NAME_VERSION = Pattern.compile("^(\\d+)\\.(\\d+)\\.(\\d+)(?:-(\\d+))?");
+    private static final String INSTALL_ACTION = "local.weaveoffice.android.UPDATE_INSTALLED";
+
+    private final Activity activity;
+    private final File filesDir;
+    private final Handler main = new Handler(Looper.getMainLooper());
+    private final ExecutorService net = Executors.newSingleThreadExecutor();
+    private boolean busy;
+    private boolean receiverRegistered;
+
+    /** A newer release: its tag, title, notes and APK. */
+    private static final class Release {
+        String tag;
+        String title;
+        String notes;
+        String apkUrl;
+        long apkSize;
+        int[] version;
+    }
+
+    Updater(Activity activity) {
+        this.activity = activity;
+        this.filesDir = activity.getFilesDir();
+    }
+
+    /** Whether the startup check is on (Help › Check for Updates at Startup; Rust owns the file). */
+    boolean checkAtStartup() {
+        return !new File(filesDir, "update-check-off").exists();
+    }
+
+    /**
+     * Look for a newer release. {@code manual}: the user asked (Help › Check for Updates…), so
+     * say so when there is none or the check fails, and offer a skipped version again.
+     */
+    void check(boolean manual) {
+        if (busy) {
+            return;
+        }
+        busy = true;
+        if (manual) {
+            toast("Checking for updates…");
+        }
+        net.execute(() -> {
+            Release r = null;
+            String error = null;
+            try {
+                r = newest();
+            } catch (Exception e) {
+                Log.w(TAG, "update check", e);
+                error = e.getMessage();
+            }
+            final Release found = r;
+            final String failed = error;
+            main.post(() -> {
+                busy = false;
+                if (activity.isFinishing()) {
+                    return;
+                }
+                if (failed != null) {
+                    if (manual) {
+                        toast("Couldn't check for updates: " + failed);
+                    }
+                } else if (found == null) {
+                    if (manual) {
+                        toast("Weave Office is up to date (" + currentName() + ").");
+                    }
+                } else if (manual || !found.tag.equals(prefs().getString("skipped", ""))) {
+                    offer(found);
+                }
+            });
+        });
+    }
+
+    // ---- Finding the release ---------------------------------------------------------------
+
+    private String currentName() {
+        try {
+            String n = activity.getPackageManager().getPackageInfo(activity.getPackageName(), 0).versionName;
+            return n == null ? "" : n.replace("-android", "");
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    static int[] parse(Pattern p, String s) {
+        Matcher m = p.matcher(s == null ? "" : s);
+        if (!m.find()) {
+            return null;
+        }
+        int[] v = new int[4];
+        for (int i = 0; i < 4; i++) {
+            String g = m.group(i + 1);
+            v[i] = g == null ? 0 : Integer.parseInt(g);
+        }
+        return v;
+    }
+
+    static int compare(int[] a, int[] b) {
+        for (int i = 0; i < 4; i++) {
+            if (a[i] != b[i]) {
+                return Integer.compare(a[i], b[i]);
+            }
+        }
+        return 0;
+    }
+
+    /** The newest release newer than this build, with an APK; null when there is none. */
+    private Release newest() throws IOException, org.json.JSONException {
+        int[] current = parse(NAME_VERSION, currentName());
+        if (current == null) {
+            throw new IOException("unknown installed version");
+        }
+        JSONArray releases = new JSONArray(new String(get(API), StandardCharsets.UTF_8));
+        Release best = null;
+        for (int i = 0; i < releases.length(); i++) {
+            JSONObject rel = releases.getJSONObject(i);
+            if (rel.optBoolean("draft")) {
+                continue;
+            }
+            String tag = rel.optString("tag_name");
+            int[] v = parse(TAG_VERSION, tag);
+            if (v == null || compare(v, current) <= 0 || (best != null && compare(v, best.version) <= 0)) {
+                continue;
+            }
+            JSONArray assets = rel.optJSONArray("assets");
+            for (int j = 0; assets != null && j < assets.length(); j++) {
+                JSONObject a = assets.getJSONObject(j);
+                if (a.optString("name").endsWith(".apk")) {
+                    Release r = new Release();
+                    r.tag = tag;
+                    r.title = rel.optString("name", tag);
+                    r.notes = rel.optString("body", "");
+                    r.apkUrl = a.getString("browser_download_url");
+                    r.apkSize = a.optLong("size", -1);
+                    r.version = v;
+                    best = r;
+                    break;
+                }
+            }
+        }
+        return best;
+    }
+
+    private HttpURLConnection open(String url) throws IOException {
+        HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+        c.setConnectTimeout(15000);
+        c.setReadTimeout(30000);
+        c.setRequestProperty("User-Agent", "WeaveOffice-Android/" + currentName());
+        c.setRequestProperty("Accept", url.startsWith("https://api.github.com/") ? "application/vnd.github+json" : "application/octet-stream");
+        // GitHub sends release downloads to its file host: both HTTPS, so followed.
+        c.setInstanceFollowRedirects(true);
+        int code = c.getResponseCode();
+        if (code != 200) {
+            c.disconnect();
+            throw new IOException("GitHub answered " + code);
+        }
+        return c;
+    }
+
+    private byte[] get(String url) throws IOException {
+        HttpURLConnection c = open(url);
+        try (InputStream in = c.getInputStream()) {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] buf = new byte[16384];
+            for (int n; (n = in.read(buf)) > 0; ) {
+                out.write(buf, 0, n);
+            }
+            return out.toByteArray();
+        } finally {
+            c.disconnect();
+        }
+    }
+
+    // ---- Asking ----------------------------------------------------------------------------
+
+    /** The release notes' "New in this build" section (or their start), for the dialog. */
+    static String summary(String notes) {
+        String s = notes.replace("\r", "");
+        int at = s.indexOf("## New in this build");
+        if (at >= 0) {
+            s = s.substring(s.indexOf('\n', at) + 1);
+            int end = s.indexOf("\n## ");
+            if (end >= 0) {
+                s = s.substring(0, end);
+            }
+        }
+        s = s.replaceAll("\\*\\*|`", "").replaceAll("(?m)^- ", "• ").replaceAll("\\n[ \\t]*(?![•\\n])", " ").trim();
+        return s.length() > 900 ? s.substring(0, 900) + "…" : s;
+    }
+
+    private void offer(Release r) {
+        String name = r.tag.replace("android-v", "");
+        new AlertDialog.Builder(activity, AlertDialog.THEME_DEVICE_DEFAULT_DARK)
+                .setTitle("Weave Office " + name + " is available")
+                .setMessage("You have " + currentName() + ".\n\n" + summary(r.notes) + "\n\nDownload and install it now? Save your work first: Weave Office closes to update.")
+                .setPositiveButton("Install", (d, w) -> download(r))
+                .setNegativeButton("Later", null)
+                .setNeutralButton("Skip This Version", (d, w) -> prefs().edit().putString("skipped", r.tag).apply())
+                .show();
+    }
+
+    private SharedPreferences prefs() {
+        return activity.getSharedPreferences("updates", Context.MODE_PRIVATE);
+    }
+
+    // ---- Downloading and installing --------------------------------------------------------
+
+    private void download(Release r) {
+        ProgressBar bar = new ProgressBar(activity, null, android.R.attr.progressBarStyleHorizontal);
+        bar.setMax(1000);
+        bar.setPadding(48, 24, 48, 0);
+        final boolean[] cancelled = {false};
+        AlertDialog dialog = new AlertDialog.Builder(activity, AlertDialog.THEME_DEVICE_DEFAULT_DARK)
+                .setTitle("Downloading Weave Office " + r.tag.replace("android-v", ""))
+                .setView(bar)
+                .setCancelable(false)
+                .setNegativeButton("Cancel", (d, w) -> cancelled[0] = true)
+                .show();
+        busy = true;
+        net.execute(() -> {
+            File apk = new File(activity.getCacheDir(), "update.apk");
+            String error = null;
+            try {
+                HttpURLConnection c = open(r.apkUrl);
+                long total = r.apkSize > 0 ? r.apkSize : c.getContentLengthLong();
+                long done = 0;
+                try (InputStream in = c.getInputStream(); OutputStream out = new FileOutputStream(apk)) {
+                    byte[] buf = new byte[65536];
+                    for (int n; (n = in.read(buf)) > 0; ) {
+                        if (cancelled[0]) {
+                            throw new IOException("cancelled");
+                        }
+                        out.write(buf, 0, n);
+                        done += n;
+                        if (total > 0) {
+                            final int p = (int) (done * 1000 / total);
+                            main.post(() -> bar.setProgress(p));
+                        }
+                    }
+                } finally {
+                    c.disconnect();
+                }
+                if (r.apkSize > 0 && done != r.apkSize) {
+                    throw new IOException("the download was incomplete");
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "update download", e);
+                error = e.getMessage();
+                //noinspection ResultOfMethodCallIgnored
+                apk.delete();
+            }
+            final String failed = error;
+            main.post(() -> {
+                busy = false;
+                dialog.dismiss();
+                if (cancelled[0]) {
+                    return;
+                }
+                if (failed != null) {
+                    toast("The update couldn't be downloaded: " + failed);
+                    return;
+                }
+                install(apk);
+            });
+        });
+    }
+
+    /** The APK left by a download while the user was allowing Weave Office to install apps. */
+    void resumePendingInstall() {
+        File apk = new File(activity.getCacheDir(), "update.apk");
+        if (prefs().getBoolean("awaiting-permission", false) && apk.isFile()
+                && activity.getPackageManager().canRequestPackageInstalls()) {
+            prefs().edit().putBoolean("awaiting-permission", false).apply();
+            install(apk);
+        }
+    }
+
+    private void install(File apk) {
+        if (!activity.getPackageManager().canRequestPackageInstalls()) {
+            // Android asks once per app: send the user to the switch, and carry on when they're back.
+            prefs().edit().putBoolean("awaiting-permission", true).apply();
+            toast("Allow Weave Office to install apps, then come back to finish the update.");
+            activity.startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    Uri.parse("package:" + activity.getPackageName())));
+            return;
+        }
+        net.execute(() -> {
+            try {
+                PackageInstaller installer = activity.getPackageManager().getPackageInstaller();
+                PackageInstaller.SessionParams params = new PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL);
+                params.setAppPackageName(activity.getPackageName());
+                int id = installer.createSession(params);
+                try (PackageInstaller.Session session = installer.openSession(id)) {
+                    try (InputStream in = new FileInputStream(apk); OutputStream out = session.openWrite("weave-office.apk", 0, apk.length())) {
+                        byte[] buf = new byte[65536];
+                        for (int n; (n = in.read(buf)) > 0; ) {
+                            out.write(buf, 0, n);
+                        }
+                        session.fsync(out);
+                    }
+                    main.post(this::registerReceiver);
+                    Intent status = new Intent(INSTALL_ACTION).setPackage(activity.getPackageName());
+                    int flags = PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= 31 ? PendingIntent.FLAG_MUTABLE : 0);
+                    session.commit(PendingIntent.getBroadcast(activity, id, status, flags).getIntentSender());
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "update install", e);
+                main.post(() -> toast("The update couldn't be installed: " + e.getMessage()));
+            }
+        });
+    }
+
+    private void registerReceiver() {
+        if (receiverRegistered) {
+            return;
+        }
+        receiverRegistered = true;
+        ContextCompat.registerReceiver(activity.getApplicationContext(), new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                int status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE);
+                if (status == PackageInstaller.STATUS_PENDING_USER_ACTION) {
+                    Intent confirm = intent.getParcelableExtra(Intent.EXTRA_INTENT);
+                    if (confirm != null) {
+                        confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        context.startActivity(confirm);
+                    }
+                } else if (status != PackageInstaller.STATUS_SUCCESS) {
+                    String msg = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE);
+                    Log.w(TAG, "update install: " + status + " " + msg);
+                    if (status != PackageInstaller.STATUS_FAILURE_ABORTED) {
+                        Toast.makeText(context, status == PackageInstaller.STATUS_FAILURE_CONFLICT || status == PackageInstaller.STATUS_FAILURE_INCOMPATIBLE
+                                ? "The update is signed with a different key than this copy of Weave Office: uninstall it and install the update by hand."
+                                : "The update couldn't be installed" + (msg == null ? "." : ": " + msg), Toast.LENGTH_LONG).show();
+                    }
+                }
+            }
+        }, new IntentFilter(INSTALL_ACTION), ContextCompat.RECEIVER_NOT_EXPORTED);
+    }
+
+    private void toast(String text) {
+        Toast.makeText(activity, text, Toast.LENGTH_LONG).show();
+    }
+}

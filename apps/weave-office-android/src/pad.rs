@@ -52,6 +52,7 @@ impl Default for PadConfig {
                 KeyConfig { label: "Redo".into(), action: "edit.redo".into(), color: [70, 90, 120] },
                 KeyConfig { label: "Save".into(), action: "file.save".into(), color: [60, 110, 80] },
                 KeyConfig { label: "Print".into(), action: "android.print".into(), color: [110, 90, 60] },
+                KeyConfig { label: "Update".into(), action: "android.update".into(), color: [90, 70, 110] },
             ],
             wheel: WheelConfig { up: "view.zoomIn".into(), down: "view.zoomOut".into() },
         }

@@ -63,6 +63,8 @@ public class WeaveOfficeActivity extends GameActivity {
     private final Map<String, Long> written = new java.util.concurrent.ConcurrentHashMap<>();
     /** A counter for the names of documents other apps sent. */
     private int incomingSeq = 0;
+    /** The self-updater (GitHub releases). */
+    private Updater updater;
 
     private final Runnable poll = new Runnable() {
         @Override
@@ -72,6 +74,7 @@ public class WeaveOfficeActivity extends GameActivity {
                 checkSync();
                 checkClipboard();
                 checkPrint();
+                checkUpdateRequest();
                 checkQuit();
             } catch (Exception e) {
                 Log.e(TAG, "bridge", e);
@@ -97,6 +100,11 @@ public class WeaveOfficeActivity extends GameActivity {
             getWindow().setAttributes(lp);
         }
         handleSentDocument(getIntent());
+        updater = new Updater(this);
+        if (state == null && updater.checkAtStartup()) {
+            // A moment after launch, so the first frames aren't competing with it.
+            handler.postDelayed(() -> updater.check(false), 4000);
+        }
         // The system clipboard: publish it to the bridge whenever it changes, so the app's
         // paste reads the current text without a round trip.
         android.content.ClipboardManager clipboard =
@@ -113,6 +121,15 @@ public class WeaveOfficeActivity extends GameActivity {
         super.onNewIntent(intent);
         setIntent(intent);
         handleSentDocument(intent);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // An update downloaded while the user was allowing Weave Office to install apps.
+        if (updater != null) {
+            updater.resumePendingInstall();
+        }
     }
 
     @Override
@@ -388,6 +405,16 @@ public class WeaveOfficeActivity extends GameActivity {
                 (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
         if (clipboard != null) {
             clipboard.setPrimaryClip(ClipData.newPlainText("Weave Office", text));
+        }
+    }
+
+    // ---- Updates ---------------------------------------------------------------------------
+
+    /** The app asked for an update check (the Shortcut Pad's Update key). */
+    private void checkUpdateRequest() {
+        File request = new File(bridge, "check-update");
+        if (request.exists() && request.delete()) {
+            updater.check(true);
         }
     }
 

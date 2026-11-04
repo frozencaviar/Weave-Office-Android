@@ -90,6 +90,11 @@ impl Bridge {
         paths
     }
 
+    /// Ask the Activity to check GitHub for a newer release.
+    pub fn request_update_check(&self) {
+        let _ = fs::write(self.root.join("check-update"), b"");
+    }
+
     /// A fresh path for a PDF the shell prints.
     pub fn print_path(&self) -> PathBuf {
         let dir = self.root.join("print");

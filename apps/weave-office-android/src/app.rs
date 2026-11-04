@@ -184,10 +184,10 @@ impl eframe::App for Shell {
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         self.app.logic(ctx, frame);
         if let Some(action) = self.pad.take_pending() {
-            if action == "android.print" {
-                self.begin_print();
-            } else {
-                self.app.run_shell_command(ctx, &action);
+            match action.as_str() {
+                "android.print" => self.begin_print(),
+                "android.update" => self.bridge.request_update_check(),
+                _ => self.app.run_shell_command(ctx, &action),
             }
         }
         // The PDF a print job is waiting for: hand it over once the export wrote it.
