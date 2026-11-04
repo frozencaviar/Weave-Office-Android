@@ -15,10 +15,10 @@ const MIN_KEYS: usize = 2;
 const MAX_KEYS: usize = 10;
 /// How far the wheel must be turned before it runs one step (one twelfth of a turn).
 const WHEEL_STEP: f32 = std::f32::consts::TAU / 12.0;
-const KEY_W: f32 = 56.0;
-const KEY_H: f32 = 64.0;
-const KEY_RADIUS: f32 = 24.0;
-const WHEEL_SIZE: f32 = 64.0;
+const KEY_W: f32 = 48.0;
+const KEY_H: f32 = 56.0;
+const KEY_RADIUS: f32 = 20.0;
+const WHEEL_SIZE: f32 = 56.0;
 const BAR_H: f32 = 26.0;
 const COLLAPSED_W: f32 = 26.0;
 const COLLAPSED_H: f32 = 120.0;
@@ -413,12 +413,13 @@ fn key_button(ui: &mut egui::Ui, key: &KeyConfig) -> bool {
     painter.circle_filled(center, radius, fill);
     painter.circle_stroke(center, radius, egui::Stroke::new(1.0, visuals.widgets.inactive.bg_stroke.color));
     let icon = match key.action.as_str() {
-        "edit.undo" => "↶",
-        "edit.redo" => "↷",
-        "file.save" => "⤓",
-        _ => "•",
+        "edit.undo" => weave_office::icons::Icon::Undo,
+        "edit.redo" => weave_office::icons::Icon::Redo,
+        "file.save" => weave_office::icons::Icon::Save,
+        _ => weave_office::icons::Icon::More,
     };
-    painter.text(center, egui::Align2::CENTER_CENTER, icon, egui::FontId::proportional(22.0), visuals.text_color());
+    let icon_rect = egui::Rect::from_center_size(center, egui::Vec2::splat(20.0));
+    weave_office::icons::paint(painter, icon_rect, icon, visuals.text_color());
     painter.text(
         egui::pos2(rect.center().x, rect.bottom() - 6.0),
         egui::Align2::CENTER_CENTER,
