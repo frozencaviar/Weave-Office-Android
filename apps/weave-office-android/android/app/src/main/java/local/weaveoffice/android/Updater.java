@@ -54,10 +54,10 @@ final class Updater {
     /**
      * The repository whose releases are the updates.
      *
-     * <p>PLACEHOLDER: change this to wherever the APK is published. The releases must be tagged
-     * {@code android-v<version>[-<build>]} with the APK attached (see build.sh).
+     * <p>The releases must be tagged {@code android-v<version>[-<build>]} with the APK attached;
+     * {@code .github/workflows/android.yml} publishes one for every such tag.
      */
-    static final String REPO = "Jamailar/Weave-Office";
+    static final String REPO = "frozencaviar/Weave-Office-Android";
     private static final String API = "https://api.github.com/repos/" + REPO + "/releases?per_page=20";
     private static final Pattern TAG_VERSION = Pattern.compile("^android-v(\\d+)\\.(\\d+)\\.(\\d+)(?:-(\\d+))?$");
     private static final Pattern NAME_VERSION = Pattern.compile("^(\\d+)\\.(\\d+)\\.(\\d+)(?:-(\\d+))?");

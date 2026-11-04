@@ -246,6 +246,17 @@ impl WeaveApp {
             Editor::TextFile(_) | Editor::Rich(_) => None,
         }
     }
+    /// Whether the active presentation has a drawing tool armed (a pen, a highlighter, the
+    /// eraser), so the Android shell lets one finger — or the pen, which winit reports as one —
+    /// draw instead of scrolling the page.
+    pub fn is_drawing(&self) -> bool {
+        use crate::editor::Editor;
+        use deckcraft_engine::tools::ToolKind;
+        self.host.active().is_some_and(|document| match &document.editor {
+            Editor::Slides(slides) => matches!(slides.session.tool.kind, ToolKind::Ink { .. }),
+            _ => false,
+        })
+    }
     /// The active document's zoom range in percent, for the Android Shortcut Pad's dial.
     pub fn zoom_range(&self) -> Option<(f32, f32)> {
         use crate::editor::Editor;

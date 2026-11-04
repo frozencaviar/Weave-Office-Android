@@ -93,6 +93,7 @@ fn run(android: AndroidApp) -> Result<(), String> {
                 pad,
                 touch: crate::touch::TouchScroll::new(),
                 modifiers: egui::Modifiers::default(),
+                wants_text: false,
                 layout_checked: false,
                 print_pending: None,
             }))
@@ -117,6 +118,9 @@ struct Shell {
     touch: crate::touch::TouchScroll,
     /// The modifier keys, which winit's Android backend never reports.
     modifiers: egui::Modifiers,
+    /// Whether the app asked for text input last frame: a focused field, or a canvas text
+    /// editor that publishes its own IME descriptor without taking egui's keyboard focus.
+    wants_text: bool,
     /// Whether the phone-or-tablet layout has been chosen for this window.
     layout_checked: bool,
     /// The PDF the app is exporting for a print job, until the Activity takes it.
@@ -140,8 +144,12 @@ impl Shell {
     }
 
     /// The on-screen keyboard's text, as egui events (winit drops GameActivity's text events).
+    ///
+    /// A canvas text editor (the presentation's shapes, a document's page) publishes its own IME
+    /// descriptor and deliberately keeps egui's keyboard focus empty, so "a widget has focus" is
+    /// not the question to ask: the app wants text whenever it published a descriptor.
     fn ime_events(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
-        let editing = ctx.egui_wants_keyboard_input();
+        let editing = self.wants_text;
         if editing && !self.editing {
             self.reset_keyboard();
         }
@@ -157,6 +165,9 @@ impl Shell {
         let now = self.android.text_input_state().text;
         if now != self.ime {
             let edit = crate::ime::diff(&self.ime, &now);
+            if !edit.inserted.is_ascii() || edit.removed > 0 {
+                log::info!("ime: {:?} -> {:?} (removed {}, inserted {:?})", self.ime, now, edit.removed, edit.inserted);
+            }
             raw.events.extend(crate::ime::events(&edit));
             self.ime = now;
         }
@@ -165,25 +176,27 @@ impl Shell {
     }
 
     /// winit's Android backend never emits `ModifiersChanged`, so Ctrl, Shift and Alt would
-    /// never reach egui and every shortcut (Ctrl+C, Ctrl+Z, Shift+arrows) would be dead. Track
-    /// the modifier keys from their own key events and hand egui the change it expects.
+    /// never reach egui and every shortcut (Ctrl+C, Ctrl+Z, Ctrl+A, Shift+arrows) would be dead.
+    /// Track the modifier keys from their own key events, hand egui the change it expects, and
+    /// stamp the tracked state onto each key event: egui-winit builds those from the platform's
+    /// (always empty) modifiers, and the editors read the shortcut's modifiers from the event.
     fn track_modifiers(&mut self, raw: &mut egui::RawInput) {
         let mut changed = false;
-        for event in &raw.events {
-            if let egui::Event::Key { key, pressed, .. } = event {
-                let mut state = self.modifiers;
-                match key {
-                    egui::Key::ControlLeft | egui::Key::ControlRight => state.ctrl = *pressed,
-                    egui::Key::ShiftLeft | egui::Key::ShiftRight => state.shift = *pressed,
-                    egui::Key::AltLeft | egui::Key::AltRight => state.alt = *pressed,
-                    egui::Key::SuperLeft | egui::Key::SuperRight => state.mac_cmd = *pressed,
-                    _ => continue,
-                }
-                state.command = state.ctrl || state.mac_cmd;
-                if state != self.modifiers {
-                    self.modifiers = state;
-                    changed = true;
-                }
+        for event in &mut raw.events {
+            let egui::Event::Key { key, pressed, modifiers, .. } = event else { continue };
+            *modifiers = self.modifiers;
+            let mut state = self.modifiers;
+            match key {
+                egui::Key::ControlLeft | egui::Key::ControlRight => state.ctrl = *pressed,
+                egui::Key::ShiftLeft | egui::Key::ShiftRight => state.shift = *pressed,
+                egui::Key::AltLeft | egui::Key::AltRight => state.alt = *pressed,
+                egui::Key::SuperLeft | egui::Key::SuperRight => state.mac_cmd = *pressed,
+                _ => continue,
+            }
+            state.command = state.ctrl || state.mac_cmd;
+            if state != self.modifiers {
+                self.modifiers = state;
+                changed = true;
             }
         }
         if changed {
@@ -208,7 +221,7 @@ impl eframe::App for Shell {
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
         self.ime_events(ctx, raw);
         let (card, dial) = self.pad.rects();
-        self.touch.apply(raw, self.pad.finger_mode(), card, dial);
+        self.touch.apply(ctx, raw, self.pad.finger_mode(), self.app.is_drawing(), self.bridge.pen(), self.modifiers, card, dial);
         self.track_modifiers(raw);
         self.app.raw_input_hook(ctx, raw);
     }
@@ -253,6 +266,11 @@ impl eframe::App for Shell {
         self.app.ui(ui, frame);
         // The pad draws over the app's edge, so it is on top of the window.
         self.pad.show(ui.ctx(), self.app.zoom_percent(), self.app.zoom_range());
+        // Whether the keyboard's text belongs to the app this frame: a focused field, or a canvas
+        // text editor that published an IME descriptor of its own.
+        let ctx = ui.ctx();
+        self.wants_text = ctx.egui_wants_keyboard_input() || ctx.output(|out| out.ime.is_some());
+
     }
 
     fn on_exit(&mut self, gl: Option<&eframe::glow::Context>) {

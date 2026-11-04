@@ -3,6 +3,7 @@ name: Android
 on:
   push:
     branches: [main]
+    tags: ['android-v*']
   pull_request:
   workflow_dispatch:
 
@@ -64,6 +65,13 @@ jobs:
           CRAFT_I18N_REQUIRED: '1'
         run: cargo test -p weave-office-android
 
+      # A release key, when the repository has one: the APK then updates a build signed with the
+      # same key, which is what the in-app updater needs. Without the secrets the debug key is
+      # used, which installs as is but cannot update a differently-signed build.
+      - name: Release key
+        if: ${{ secrets.WEAVE_KEYSTORE_BASE64 != '' }}
+        run: echo "${{ secrets.WEAVE_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/weave-release.jks"
+
       - name: Build the APK
         env:
           ANDROID_HOME: ${{ env.ANDROID_HOME }}
@@ -71,6 +79,10 @@ jobs:
           CRAFT_FONTS_DIR: ${{ runner.temp }}/craft-fonts
           WEAVE_DOCUMENT_FONTS_DIR: ${{ runner.temp }}/weave-document-fonts
           CRAFT_I18N_DIR: ${{ runner.temp }}/craft-i18n
+          WEAVE_KEYSTORE: ${{ runner.temp }}/weave-release.jks
+          WEAVE_KEYSTORE_PASSWORD: ${{ secrets.WEAVE_KEYSTORE_PASSWORD }}
+          WEAVE_KEY_ALIAS: ${{ secrets.WEAVE_KEY_ALIAS }}
+          WEAVE_KEY_PASSWORD: ${{ secrets.WEAVE_KEY_PASSWORD }}
         run: apps/weave-office-android/build.sh
 
       - name: Upload the APK
@@ -78,3 +90,33 @@ jobs:
         with:
           name: weave-office-android
           path: target/android/*.apk
+
+  # A tag `android-v<version>` publishes a release the in-app updater can install: the APK is
+  # attached and the tag names the version. `git tag android-v0.1.1 && git push origin android-v0.1.1`.
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/android-v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: weave-office-android
+          path: apk
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG#android-v}"
+          gh release create "$TAG" apk/*.apk \
+            --repo "${{ github.repository }}" \
+            --title "Weave Office for Android $version" \
+            --notes "Weave Office $version for Android tablets and phones (arm64-v8a, Android 8.0+).
+
+          Download the APK below and sideload it with `adb install -r`, or let the app's own updater install it.
+
+          See the [README](https://github.com/${{ github.repository }}#readme) for what the port adds and how to build it."

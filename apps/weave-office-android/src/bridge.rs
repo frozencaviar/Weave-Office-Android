@@ -132,6 +132,16 @@ impl Bridge {
         fs::read_to_string(self.root.join("clip.txt")).ok()
     }
 
+    /// Whether the pointer in use is a stylus or its eraser, as the Activity last reported it.
+    ///
+    /// winit's Android backend turns every MotionEvent into a touch, with no tool type, so the
+    /// pen and a finger are indistinguishable there; the Activity writes the tool type here
+    /// whenever it changes.
+    pub fn pen(&self) -> bool {
+        // MotionEvent.TOOL_TYPE_STYLUS is 2, TOOL_TYPE_ERASER is 4.
+        matches!(fs::read_to_string(self.root.join("tool.txt")).ok().and_then(|t| t.trim().parse::<u32>().ok()), Some(2 | 4))
+    }
+
     /// A revision that changes when the clipboard does (the file's modification time).
     pub fn clipboard_revision(&self) -> i64 {
         fs::metadata(self.root.join("clip.txt"))

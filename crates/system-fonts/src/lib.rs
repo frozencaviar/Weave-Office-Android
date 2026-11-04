@@ -191,6 +191,10 @@ pub fn font_dirs() -> Vec<PathBuf> {
             // Fonts Microsoft Office downloads on demand (Aptos…).
             dirs.push(l.join("Microsoft\\FontCache\\4\\CloudFonts"));
         }
+    } else if cfg!(target_os = "android") {
+        // Android keeps every system face in /system/fonts; the product and vendor partitions
+        // add their own (OEM faces, and /product/fonts on newer releases).
+        dirs.extend(["/system/fonts", "/product/fonts", "/system_ext/fonts", "/vendor/fonts"].map(Into::into));
     } else {
         dirs.extend(["/usr/share/fonts", "/usr/local/share/fonts"].map(Into::into));
         if let Some(h) = &home {

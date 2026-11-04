@@ -116,6 +116,28 @@ public class WeaveOfficeActivity extends GameActivity {
         handler.post(poll);
     }
 
+    /** The last pointer tool written to the bridge ({@code MotionEvent.TOOL_TYPE_*}). */
+    private int lastTool = -1;
+
+    /**
+     * Record which pointer is in use, so the app can tell the stylus from a finger: winit's
+     * Android backend reports every MotionEvent as a touch, with no tool type of its own. The
+     * file is written only when the tool changes, so a stroke costs nothing.
+     */
+    @Override
+    public boolean dispatchTouchEvent(android.view.MotionEvent event) {
+        int tool = event.getToolType(0);
+        if (tool != lastTool) {
+            lastTool = tool;
+            try (FileOutputStream out = new FileOutputStream(new File(bridge, "tool.txt"))) {
+                out.write(Integer.toString(tool).getBytes(StandardCharsets.UTF_8));
+            } catch (IOException e) {
+                Log.e(TAG, "tool", e);
+            }
+        }
+        return super.dispatchTouchEvent(event);
+    }
+
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);

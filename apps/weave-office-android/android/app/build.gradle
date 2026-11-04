@@ -36,12 +36,26 @@ android {
         }
     }
 
+    // A release key, when the build has one: CI decodes it from the repository's secrets, and a
+    // local build can point WEAVE_KEYSTORE at the same file. Without one the debug key is used,
+    // which installs as is but cannot update a build signed with another key.
+    def releaseStore = System.getenv('WEAVE_KEYSTORE')
+    if (releaseStore != null && file(releaseStore).exists()) {
+        signingConfigs {
+            release {
+                storeFile file(releaseStore)
+                storePassword System.getenv('WEAVE_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('WEAVE_KEY_ALIAS')
+                keyPassword System.getenv('WEAVE_KEY_PASSWORD')
+            }
+        }
+    }
+
     buildTypes {
         release {
             // GameActivity calls into Java by name from native code: keep every class as is.
             minifyEnabled false
-            // A prototype: signed with the debug key so it installs as is.
-            signingConfig signingConfigs.debug
+            signingConfig releaseStore != null && file(releaseStore).exists() ? signingConfigs.release : signingConfigs.debug
         }
     }
 

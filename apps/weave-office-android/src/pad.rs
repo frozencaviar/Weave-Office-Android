@@ -35,6 +35,8 @@ const WHEEL_SIZE: f32 = 36.0;
 const BAR_H: f32 = 20.0;
 const EDGE: f32 = 8.0;
 const WHEEL_GAP: f32 = 10.0;
+/// The folded strip: a narrow tab with just the fold arrow.
+const COLLAPSED_W: f32 = 28.0;
 
 /// The dial that opens from the wheel: 150 pt across, anchored at the strip's edge.
 const DIAL: f32 = 150.0;
@@ -50,6 +52,10 @@ const FOLD_CURVE: [f32; 4] = [0.22, 1.0, 0.36, 1.0];
 const DIAL_CURVE: [f32; 4] = [0.34, 1.56, 0.64, 1.0];
 const FOLD_TIME: f32 = 0.3;
 const DIAL_TIME: f32 = 0.28;
+
+fn default_y() -> f32 {
+    0.5
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Side {
@@ -75,6 +81,9 @@ pub struct PadConfig {
     pub visible: bool,
     pub side: Side,
     pub collapsed: bool,
+    /// Where the strip sits vertically: 0 is the window's top, 1 its bottom.
+    #[serde(default = "default_y")]
+    pub y: f32,
     /// What one finger does on the page (the touch setting lives here, with the pad's).
     #[serde(default)]
     pub finger: crate::touch::FingerMode,
@@ -88,7 +97,8 @@ impl Default for PadConfig {
             visible: true,
             side: Side::Right,
             collapsed: false,
-            finger: crate::touch::FingerMode::Scroll,
+            y: 0.5,
+            finger: crate::touch::FingerMode::Auto,
             keys: vec![
                 KeyConfig { label: "Undo".into(), action: "edit.undo".into(), color: [70, 90, 120] },
                 KeyConfig { label: "Redo".into(), action: "edit.redo".into(), color: [70, 90, 120] },
@@ -308,7 +318,8 @@ impl Pad {
         let expanded_h = self.estimated_height();
         let collapsed_h = BAR_H + PAD_PAD * 2.0;
         let height = expanded_h + (collapsed_h - expanded_h) * fold;
-        let size = egui::vec2(PAD_W, height);
+        let width = PAD_W + (COLLAPSED_W - PAD_W) * fold;
+        let size = egui::vec2(width, height);
         let pos = self.position(content, size) + self.drag_offset;
         let card = egui::Rect::from_min_size(pos, size);
         let layout = Layout::new(card, self.config.keys.len());
@@ -379,9 +390,11 @@ impl Pad {
             });
         self.drag_offset += drag_delta;
         if drag_stopped {
-            // Snap to the nearer edge, judged by where the strip ended up.
-            let x = response.response.rect.center().x;
-            self.config.side = if x < content.center().x { Side::Left } else { Side::Right };
+            // Snap to the nearer edge and keep the height it was dropped at.
+            let rect = response.response.rect;
+            self.config.side = if rect.center().x < content.center().x { Side::Left } else { Side::Right };
+            let travel = (content.height() - rect.height()).max(1.0);
+            self.config.y = ((rect.top() - content.top()) / travel).clamp(0.0, 1.0);
             self.drag_offset = egui::Vec2::ZERO;
             self.save();
         }
@@ -408,7 +421,8 @@ impl Pad {
             Side::Left => content.left() + EDGE,
             Side::Right => content.right() - EDGE - size.x,
         };
-        egui::pos2(x, content.center().y - size.y / 2.0)
+        let travel = (content.height() - size.y).max(0.0);
+        egui::pos2(x, content.top() + travel * self.config.y.clamp(0.0, 1.0))
     }
 
     /// The dial's bounding box: anchored at the strip's edge, centred on the wheel.
@@ -465,7 +479,8 @@ impl Pad {
             chevron.iter().map(|&point| rotate(point)).collect(),
             egui::Stroke::new(1.4, weak),
         ));
-        // The grip: two columns of three dots.
+        // The grip: two columns of three dots, gone once the strip is folded to its tab.
+        let grip = weak.gamma_multiply(1.0 - fold);
         for row in 0..3 {
             for column in 0..2 {
                 painter.circle_filled(
@@ -474,7 +489,7 @@ impl Pad {
                         center.y - 4.0 + row as f32 * 4.0,
                     ),
                     0.9,
-                    weak,
+                    grip,
                 );
             }
         }
@@ -710,9 +725,16 @@ impl Pad {
                 });
                 ui.horizontal(|ui| {
                     ui.label("One finger:");
-                    ui.selectable_value(&mut self.config.finger, crate::touch::FingerMode::Scroll, "Scroll");
-                    ui.selectable_value(&mut self.config.finger, crate::touch::FingerMode::Select, "Select");
+                    ui.selectable_value(&mut self.config.finger, crate::touch::FingerMode::Auto, "Auto")
+                        .on_hover_text("A drag scrolls; a long press then drag moves a shape or selects text");
+                    ui.selectable_value(&mut self.config.finger, crate::touch::FingerMode::Mouse, "Mouse")
+                        .on_hover_text("A drag drags straight away, like a mouse");
                 });
+                ui.label(
+                    egui::RichText::new("Tap selects · drag scrolls · long press then drag moves · long press and release adds to the selection · two fingers scroll")
+                        .small()
+                        .weak(),
+                );
                 ui.separator();
                 ui.label("Keys:");
                 let mut remove = None;
