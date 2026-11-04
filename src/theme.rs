@@ -158,12 +158,10 @@ pub fn window_bar<R>(
         Stroke::new(1.0, divider),
     );
 
-    let button_start = rect.right()
-        - if cfg!(target_os = "macos") {
-            0.0
-        } else {
-            3.0 * BUTTON_WIDTH
-        };
+    // macOS draws its own traffic lights, and Android has no window to minimise, maximise or
+    // close — the system's own navigation does that — so neither reserves the three buttons.
+    let window_buttons = if cfg!(target_os = "macos") || cfg!(target_os = "android") { 0 } else { 3 };
+    let button_start = rect.right() - window_buttons as f32 * BUTTON_WIDTH;
     let content_left = rect.left()
         + if cfg!(target_os = "macos") {
             NATIVE_CONTROLS_WIDTH
@@ -216,7 +214,7 @@ pub fn window_bar<R>(
     }
 
     let mut close = false;
-    for index in 0..if cfg!(target_os = "macos") { 0 } else { 3 } {
+    for index in 0..window_buttons {
         let button_rect = Rect::from_min_max(
             Pos2::new(button_start + index as f32 * BUTTON_WIDTH, rect.top()),
             Pos2::new(
