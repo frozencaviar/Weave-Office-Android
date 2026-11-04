@@ -187,6 +187,35 @@ impl WeaveApp {
     /// (`edit.undo`, `file.save`, `file.print`) or an editor command (`view.zoomIn`,
     /// `view.zoom` with a percentage).
     pub fn run_shell_command(&mut self, ctx: &egui::Context, id: &str, params: serde_json::Value) {
+        // The PDF editor's zoom commands take no parameters and have their own ids.
+        if let Some(document) = self.host.active_mut() {
+            if let crate::editor::Editor::Pdf(pdf) = &mut document.editor {
+                let view = pdf.active.and_then(|index| pdf.views.get_mut(index));
+                match id {
+                    "view.zoom" => {
+                        if let Some(percent) = params.get("value").or_else(|| params.get("percent")).and_then(serde_json::Value::as_f64) {
+                            if let Some(view) = view {
+                                view.set_zoom(percent as f32 / 100.0);
+                            }
+                            return;
+                        }
+                    }
+                    "view.zoomIn" => {
+                        if let Some(view) = view {
+                            view.zoom_step(true);
+                        }
+                        return;
+                    }
+                    "view.zoomOut" => {
+                        if let Some(view) = view {
+                            view.zoom_step(false);
+                        }
+                        return;
+                    }
+                    _ => {}
+                }
+            }
+        }
         match commands::classify(id, &params) {
             HostRequest::Unsupported { .. } => {
                 if let Some(document) = self.host.active_mut() {
@@ -214,6 +243,18 @@ impl WeaveApp {
                 let view = pdf.views.get(pdf.active?)?;
                 Some(view.zoom * 100.0)
             }
+            Editor::TextFile(_) | Editor::Rich(_) => None,
+        }
+    }
+    /// The active document's zoom range in percent, for the Android Shortcut Pad's dial.
+    pub fn zoom_range(&self) -> Option<(f32, f32)> {
+        use crate::editor::Editor;
+        let document = self.host.active()?;
+        match &document.editor {
+            Editor::Word(_) => Some((10.0, 500.0)),
+            Editor::Sheet(_) => Some((10.0, 400.0)),
+            Editor::Slides(_) => Some((10.0, 400.0)),
+            Editor::Pdf(_) => Some((8.0, 6400.0)),
             Editor::TextFile(_) | Editor::Rich(_) => None,
         }
     }

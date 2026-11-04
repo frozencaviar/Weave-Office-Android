@@ -92,6 +92,7 @@ fn run(android: AndroidApp) -> Result<(), String> {
                 editing: false,
                 pad,
                 touch: crate::touch::TouchScroll::new(),
+                modifiers: egui::Modifiers::default(),
                 layout_checked: false,
                 print_pending: None,
             }))
@@ -114,6 +115,8 @@ struct Shell {
     pad: crate::pad::Pad,
     /// Two-finger scrolling, which winit's Android backend doesn't emit.
     touch: crate::touch::TouchScroll,
+    /// The modifier keys, which winit's Android backend never reports.
+    modifiers: egui::Modifiers,
     /// Whether the phone-or-tablet layout has been chosen for this window.
     layout_checked: bool,
     /// The PDF the app is exporting for a print job, until the Activity takes it.
@@ -161,6 +164,33 @@ impl Shell {
         ctx.request_repaint_after(std::time::Duration::from_millis(50));
     }
 
+    /// winit's Android backend never emits `ModifiersChanged`, so Ctrl, Shift and Alt would
+    /// never reach egui and every shortcut (Ctrl+C, Ctrl+Z, Shift+arrows) would be dead. Track
+    /// the modifier keys from their own key events and hand egui the change it expects.
+    fn track_modifiers(&mut self, raw: &mut egui::RawInput) {
+        let mut changed = false;
+        for event in &raw.events {
+            if let egui::Event::Key { key, pressed, .. } = event {
+                let mut state = self.modifiers;
+                match key {
+                    egui::Key::ControlLeft | egui::Key::ControlRight => state.ctrl = *pressed,
+                    egui::Key::ShiftLeft | egui::Key::ShiftRight => state.shift = *pressed,
+                    egui::Key::AltLeft | egui::Key::AltRight => state.alt = *pressed,
+                    egui::Key::SuperLeft | egui::Key::SuperRight => state.mac_cmd = *pressed,
+                    _ => continue,
+                }
+                state.command = state.ctrl || state.mac_cmd;
+                if state != self.modifiers {
+                    self.modifiers = state;
+                    changed = true;
+                }
+            }
+        }
+        if changed {
+            raw.events.push(egui::Event::ModifiersChanged(self.modifiers));
+        }
+    }
+
     /// Print the active document: export it to a PDF in the bridge, then let the Activity hand
     /// it to Android's print service.
     fn begin_print(&mut self) {
@@ -177,7 +207,9 @@ impl eframe::App for Shell {
 
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
         self.ime_events(ctx, raw);
-        self.touch.apply(raw);
+        let (card, dial) = self.pad.rects();
+        self.touch.apply(raw, self.pad.finger_mode(), card, dial);
+        self.track_modifiers(raw);
         self.app.raw_input_hook(ctx, raw);
     }
 
@@ -220,7 +252,7 @@ impl eframe::App for Shell {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         self.app.ui(ui, frame);
         // The pad draws over the app's edge, so it is on top of the window.
-        self.pad.show(ui.ctx(), self.app.zoom_percent());
+        self.pad.show(ui.ctx(), self.app.zoom_percent(), self.app.zoom_range());
     }
 
     fn on_exit(&mut self, gl: Option<&eframe::glow::Context>) {

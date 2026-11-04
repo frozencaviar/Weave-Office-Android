@@ -75,6 +75,9 @@ pub struct PadConfig {
     pub visible: bool,
     pub side: Side,
     pub collapsed: bool,
+    /// What one finger does on the page (the touch setting lives here, with the pad's).
+    #[serde(default)]
+    pub finger: crate::touch::FingerMode,
     pub keys: Vec<KeyConfig>,
     pub wheel: WheelConfig,
 }
@@ -85,6 +88,7 @@ impl Default for PadConfig {
             visible: true,
             side: Side::Right,
             collapsed: false,
+            finger: crate::touch::FingerMode::Scroll,
             keys: vec![
                 KeyConfig { label: "Undo".into(), action: "edit.undo".into(), color: [70, 90, 120] },
                 KeyConfig { label: "Redo".into(), action: "edit.redo".into(), color: [70, 90, 120] },
@@ -220,6 +224,9 @@ pub struct Pad {
     dial: Anim,
     /// How far the strip has been dragged from its edge position.
     drag_offset: egui::Vec2,
+    /// The strip's card and dial rectangles as of the last frame, for the shell's touch handling.
+    last_card: Option<egui::Rect>,
+    last_dial: Option<egui::Rect>,
 }
 
 impl Pad {
@@ -245,7 +252,20 @@ impl Pad {
             fold: Anim::new(if collapsed { 1.0 } else { 0.0 }),
             dial: Anim::new(0.0),
             drag_offset: egui::Vec2::ZERO,
+            last_card: None,
+            last_dial: None,
         }
+    }
+
+    /// The strip's card and dial rectangles as of the last frame, for the shell's touch
+    /// handling (a touch that starts on the pad is the pad's, not a scroll).
+    pub fn rects(&self) -> (Option<egui::Rect>, Option<egui::Rect>) {
+        (self.last_card, self.last_dial)
+    }
+
+    /// What one finger does on the page.
+    pub fn finger_mode(&self) -> crate::touch::FingerMode {
+        self.config.finger
     }
 
     fn save(&self) {
@@ -260,9 +280,9 @@ impl Pad {
         self.pending.take()
     }
 
-    /// Draw the strip over the window's edge. `zoom` is the active document's zoom in percent,
-    /// shown in the dial's middle.
-    pub fn show(&mut self, ctx: &egui::Context, zoom: Option<f32>) {
+    /// Draw the strip over the window's edge. `zoom` is the active document's zoom in percent
+    /// and `range` its editor's zoom limits, shown in the dial's middle and on its arc.
+    pub fn show(&mut self, ctx: &egui::Context, zoom: Option<f32>, range: Option<(f32, f32)>) {
         if !self.config.visible {
             return;
         }
@@ -293,6 +313,8 @@ impl Pad {
         let card = egui::Rect::from_min_size(pos, size);
         let layout = Layout::new(card, self.config.keys.len());
         let dial_rect = self.dial_rect(&layout, dial_t);
+        self.last_card = Some(card);
+        self.last_dial = Some(dial_rect);
 
         // A press outside the dial and the strip closes it.
         if self.wheel_pinned && ctx.input(|i| i.pointer.any_pressed()) {
@@ -327,7 +349,7 @@ impl Pad {
                         ui.scope_id().with("weave-pad-dial"),
                         egui::Sense::click_and_drag(),
                     );
-                    self.draw_dial(ui, &layout, dial_t, zoom);
+                    self.draw_dial(ui, &layout, dial_t, zoom, range);
                     Some(response)
                 } else {
                     None
@@ -543,7 +565,7 @@ impl Pad {
 
     /// The dial: a frosted white disc with an orange ring, rotating ticks, a progress arc and
     /// the current zoom in its middle.
-    fn draw_dial(&self, ui: &egui::Ui, layout: &Layout, t: f32, zoom: Option<f32>) {
+    fn draw_dial(&self, ui: &egui::Ui, layout: &Layout, t: f32, zoom: Option<f32>, range: Option<(f32, f32)>) {
         let radius = DIAL / 2.0 * t;
         let center = match self.config.side {
             Side::Left => egui::pos2(layout.card.left() + radius, layout.wheel.center().y),
@@ -568,6 +590,26 @@ impl Pad {
             egui::Color32::from_rgba_unmultiplied(255, 255, 255, (242.0 * alpha) as u8),
         );
         painter.circle_stroke(center, radius - 0.75, egui::Stroke::new(1.5, fade(ACCENT)));
+        // The zoom's place in the editor's range, on a log scale: a scrollbar for the zoom.
+        if let (Some(zoom), Some((min, max))) = (zoom, range) {
+            if max > min && zoom > 0.0 {
+                let t = ((zoom / min).ln() / (max / min).ln()).clamp(0.0, 1.0);
+                let sweep = t * std::f32::consts::TAU;
+                let start = -std::f32::consts::FRAC_PI_2;
+                let steps = 64;
+                let points: Vec<egui::Pos2> = (0..=steps)
+                    .map(|i| {
+                        let angle = start + sweep * i as f32 / steps as f32;
+                        center + egui::vec2(angle.cos(), angle.sin()) * (radius - 0.75)
+                    })
+                    .collect();
+                painter.add(egui::Shape::line(points, egui::Stroke::new(3.0, fade(ACCENT))));
+                let end = start + sweep;
+                let dot = center + egui::vec2(end.cos(), end.sin()) * (radius - 0.75);
+                painter.circle_filled(dot, 5.0, fade(ACCENT));
+                painter.circle_filled(dot, 2.0, fade(egui::Color32::WHITE));
+            }
+        }
         for i in 0..DIAL_TICKS {
             let angle = i as f32 * std::f32::consts::TAU / DIAL_TICKS as f32 + self.wheel_turn;
             let direction = egui::vec2(angle.cos(), angle.sin());
@@ -576,6 +618,14 @@ impl Pad {
                 egui::Stroke::new(1.0, fade(ACCENT.gamma_multiply(0.55))),
             );
         }
+        // The dial's own rotation: a longer tick that turns with the wheel, so the turning is
+        // visible even though the other ticks are alike.
+        let angle = -std::f32::consts::FRAC_PI_2 + self.wheel_turn;
+        let direction = egui::vec2(angle.cos(), angle.sin());
+        painter.line_segment(
+            [center + direction * (radius - 18.0), center + direction * (radius - 4.0)],
+            egui::Stroke::new(2.0, fade(ACCENT)),
+        );
         painter.text(
             center + egui::vec2(0.0, -10.0),
             egui::Align2::CENTER_CENTER,
@@ -657,6 +707,11 @@ impl Pad {
                     ui.label("Side:");
                     ui.selectable_value(&mut self.config.side, Side::Left, "Left");
                     ui.selectable_value(&mut self.config.side, Side::Right, "Right");
+                });
+                ui.horizontal(|ui| {
+                    ui.label("One finger:");
+                    ui.selectable_value(&mut self.config.finger, crate::touch::FingerMode::Scroll, "Scroll");
+                    ui.selectable_value(&mut self.config.finger, crate::touch::FingerMode::Select, "Select");
                 });
                 ui.separator();
                 ui.label("Keys:");
