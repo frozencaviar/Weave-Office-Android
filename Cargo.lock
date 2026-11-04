@@ -8222,6 +8222,7 @@ dependencies = [
  "android_logger",
  "eframe",
  "log",
+ "serde",
  "serde_json",
  "tempfile",
  "weave-office",

@@ -13,6 +13,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 weave-office = { path = "../.." }
 log = "0.4"
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 [dev-dependencies]

@@ -19,4 +19,7 @@ pub mod bridge;
 pub mod ime;
 
 #[cfg(target_os = "android")]
+pub mod pad;
+
+#[cfg(target_os = "android")]
 pub use app::android_main;

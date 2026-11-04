@@ -183,6 +183,21 @@ impl WeaveApp {
             Err(error) => eprintln!("automatic recovery is off: {error}"),
         }
     }
+    /// Run one command from a platform shell (the Android Shortcut Pad): a host command
+    /// (`edit.undo`, `file.save`, `file.print`) or an editor command (`view.zoomIn`).
+    pub fn run_shell_command(&mut self, ctx: &egui::Context, id: &str) {
+        let params = serde_json::json!({});
+        match commands::classify(id, &params) {
+            HostRequest::Unsupported { .. } => {
+                if let Some(document) = self.host.active_mut() {
+                    if let Err(error) = document.editor.command(id, params) {
+                        eprintln!("shell command {id}: {error}");
+                    }
+                }
+            }
+            _ => self.dispatch_requests(ctx, vec![(id.to_owned(), params)]),
+        }
+    }
     /// Reopen every copy a crashed run left as an unsaved document, then delete that run's
     /// folder once this run holds its own copies of them.
     pub fn restore_recovered(&mut self) {

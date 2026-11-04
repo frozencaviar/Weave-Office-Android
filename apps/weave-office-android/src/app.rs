@@ -51,6 +51,7 @@ fn run(android: AndroidApp) -> Result<(), String> {
     });
 
     let shell_android = android.clone();
+    let pad = crate::pad::Pad::new(&files_dir);
     let mut options = eframe::NativeOptions {
         renderer: eframe::Renderer::Wgpu,
         // eframe hands it to winit's event loop (with_android_app).
@@ -73,6 +74,7 @@ fn run(android: AndroidApp) -> Result<(), String> {
                 android: shell_android,
                 ime: String::new(),
                 editing: false,
+                pad,
             }))
         }),
     )
@@ -87,6 +89,8 @@ struct Shell {
     ime: String,
     /// Whether a text field had focus last frame.
     editing: bool,
+    /// The Shortcut Pad: touch keys and a wheel over the window's edge.
+    pad: crate::pad::Pad,
 }
 
 impl Shell {
@@ -143,10 +147,13 @@ impl eframe::App for Shell {
 
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         self.app.logic(ctx, frame);
+        self.pad.run_pending(ctx, &mut self.app);
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         self.app.ui(ui, frame);
+        // The pad draws over the app's edge, so it is on top of the window.
+        self.pad.show(ui.ctx());
     }
 
     fn on_exit(&mut self, gl: Option<&eframe::glow::Context>) {
