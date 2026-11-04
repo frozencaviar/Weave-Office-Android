@@ -71,6 +71,7 @@ public class WeaveOfficeActivity extends GameActivity {
                 checkRequest();
                 checkSync();
                 checkClipboard();
+                checkPrint();
                 checkQuit();
             } catch (Exception e) {
                 Log.e(TAG, "bridge", e);
@@ -388,6 +389,61 @@ public class WeaveOfficeActivity extends GameActivity {
         if (clipboard != null) {
             clipboard.setPrimaryClip(ClipData.newPlainText("Weave Office", text));
         }
+    }
+
+    // ---- Printing --------------------------------------------------------------------------
+
+    /** The app exported a PDF to print: hand it to Android's print service. */
+    private void checkPrint() {
+        File request = new File(bridge, "print.json");
+        if (!request.isFile()) {
+            return;
+        }
+        String path;
+        try {
+            path = new JSONObject(readText(request)).getString("path");
+        } catch (Exception e) {
+            Log.e(TAG, "print", e);
+            //noinspection ResultOfMethodCallIgnored
+            request.delete();
+            return;
+        }
+        //noinspection ResultOfMethodCallIgnored
+        request.delete();
+        final File pdf = new File(path);
+        if (!pdf.isFile()) {
+            toast("Couldn't print: the PDF is missing");
+            return;
+        }
+        android.print.PrintManager manager = (android.print.PrintManager) getSystemService(PRINT_SERVICE);
+        if (manager == null) {
+            toast("Printing isn't available on this device");
+            return;
+        }
+        android.print.PrintDocumentAdapter adapter = new android.print.PrintDocumentAdapter() {
+            @Override
+            public void onLayout(android.print.PrintAttributes oldAttributes, android.print.PrintAttributes attributes,
+                                 android.os.CancellationSignal signal, LayoutResultCallback callback, Bundle extras) {
+                android.print.PrintDocumentInfo info = new android.print.PrintDocumentInfo.Builder(pdf.getName())
+                        .setContentType(android.print.PrintDocumentInfo.CONTENT_TYPE_DOCUMENT)
+                        .build();
+                callback.onLayoutFinished(info, true);
+            }
+
+            @Override
+            public void onWrite(android.print.PageRange[] pages, android.os.ParcelFileDescriptor destination,
+                                android.os.CancellationSignal signal, WriteResultCallback callback) {
+                try (InputStream in = new FileInputStream(pdf);
+                     OutputStream out = new FileOutputStream(destination.getFileDescriptor())) {
+                    copy(in, out);
+                    callback.onWriteFinished(new android.print.PageRange[]{android.print.PageRange.ALL_PAGES});
+                } catch (Exception e) {
+                    Log.e(TAG, "print write", e);
+                    callback.onWriteFailed(e.getMessage());
+                }
+            }
+        };
+        manager.print(pdf.getName(), adapter, new android.print.PrintAttributes.Builder().build());
     }
 
     // ---- Documents from other apps ---------------------------------------------------------

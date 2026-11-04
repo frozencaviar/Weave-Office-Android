@@ -202,6 +202,12 @@ impl WeaveApp {
     pub fn open_external(&mut self, path: PathBuf) {
         self.actions.push_back(Action::OpenExternal(path));
     }
+    /// Export the active document to a PDF at `path` (the Android shell prints it).
+    pub fn export_pdf_to(&mut self, path: PathBuf) {
+        if let Some(tab) = self.host.workspace.active() {
+            self.actions.push_back(Action::ExportPdf(tab, Some(path)));
+        }
+    }
     /// Reopen every copy a crashed run left as an unsaved document, then delete that run's
     /// folder once this run holds its own copies of them.
     pub fn restore_recovered(&mut self) {

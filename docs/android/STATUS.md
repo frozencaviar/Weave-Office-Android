@@ -23,6 +23,7 @@
 | **Open with / Share** | The Activity accepts `ACTION_VIEW`/`ACTION_SEND` for docx/xlsx/pptx/pdf/md/txt, copies the document into `bridge/incoming/`, and the shell moves it to `bridge/documents/` and opens it once (`WeaveApp::open_external`) |
 | **Phone layout** | A phone-class screen (smallest side under 600 pt) gets the interface at 75% |
 | **Clipboard** | The Activity publishes the system clipboard to `bridge/clip.txt` (a change listener), the app's copy writes `bridge/clip-set.txt`, and the host's clipboard reads/writes through the shell's hook (`src/clipboard.rs`); in-app rich payloads still work |
+| **Printing** | The Shortcut Pad's Print key (`android.print`) exports the active document to a PDF in the bridge and the Activity hands it to Android's `PrintManager` (a `PrintDocumentAdapter` streams the file) |
 | **Release APK** | `apps/weave-office-android/build.sh` → `target/android/weave-office-0.1.1-arm64-v8a.apk` (236 MB): package `local.weaveoffice.android`, versionCode 101, minSdk 26, targetSdk 35, `arm64-v8a`, debug-signed |
 
 | **CI** | `.github/workflows/android.yml`: Rust 1.95 + Android target, JDK 17, SDK/NDK, cargo-ndk, the pinned font inputs, the host tests and the APK build, uploaded as an artifact |

@@ -93,6 +93,7 @@ fn run(android: AndroidApp) -> Result<(), String> {
                 pad,
                 touch: crate::touch::TouchScroll::new(),
                 layout_checked: false,
+                print_pending: None,
             }))
         }),
     )
@@ -115,6 +116,8 @@ struct Shell {
     touch: crate::touch::TouchScroll,
     /// Whether the phone-or-tablet layout has been chosen for this window.
     layout_checked: bool,
+    /// The PDF the app is exporting for a print job, until the Activity takes it.
+    print_pending: Option<PathBuf>,
 }
 
 impl Shell {
@@ -157,6 +160,14 @@ impl Shell {
         // GameActivity's text events don't wake the UI (winit drops them): poll while typing.
         ctx.request_repaint_after(std::time::Duration::from_millis(50));
     }
+
+    /// Print the active document: export it to a PDF in the bridge, then let the Activity hand
+    /// it to Android's print service.
+    fn begin_print(&mut self) {
+        let path = self.bridge.print_path();
+        self.print_pending = Some(path.clone());
+        self.app.export_pdf_to(path);
+    }
 }
 
 impl eframe::App for Shell {
@@ -172,7 +183,20 @@ impl eframe::App for Shell {
 
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         self.app.logic(ctx, frame);
-        self.pad.run_pending(ctx, &mut self.app);
+        if let Some(action) = self.pad.take_pending() {
+            if action == "android.print" {
+                self.begin_print();
+            } else {
+                self.app.run_shell_command(ctx, &action);
+            }
+        }
+        // The PDF a print job is waiting for: hand it over once the export wrote it.
+        if let Some(path) = &self.print_pending {
+            if std::fs::metadata(path).map(|meta| meta.len() > 0).unwrap_or(false) {
+                self.bridge.request_print(path);
+                self.print_pending = None;
+            }
+        }
         // Documents another app sent ("Open with" / "Share").
         for path in self.bridge.take_incoming() {
             self.app.open_external(path);

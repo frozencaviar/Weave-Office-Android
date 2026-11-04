@@ -90,6 +90,22 @@ impl Bridge {
         paths
     }
 
+    /// A fresh path for a PDF the shell prints.
+    pub fn print_path(&self) -> PathBuf {
+        let dir = self.root.join("print");
+        let _ = fs::create_dir_all(&dir);
+        let id = self.next.fetch_add(1, Ordering::Relaxed);
+        dir.join(format!("{id}.pdf"))
+    }
+
+    /// Ask the Activity to print `path`: it hands the PDF to Android's print service.
+    pub fn request_print(&self, path: &Path) {
+        let request = serde_json::json!({ "path": path.to_string_lossy() });
+        if let Err(error) = write_then_rename(&self.root.join("print.json"), request.to_string().as_bytes()) {
+            log::warn!("bridge: couldn't write the print request: {error}");
+        }
+    }
+
     /// Put text on the system clipboard; returns a revision that changes with it.
     pub fn set_clipboard(&self, text: &str) -> i64 {
         let _ = write_then_rename(&self.root.join("clip-set.txt"), text.as_bytes());

@@ -9,7 +9,6 @@ use std::path::{Path, PathBuf};
 
 use eframe::egui;
 use serde::{Deserialize, Serialize};
-use weave_office::app::WeaveApp;
 
 const MIN_KEYS: usize = 2;
 const MAX_KEYS: usize = 10;
@@ -52,7 +51,7 @@ impl Default for PadConfig {
                 KeyConfig { label: "Undo".into(), action: "edit.undo".into(), color: [70, 90, 120] },
                 KeyConfig { label: "Redo".into(), action: "edit.redo".into(), color: [70, 90, 120] },
                 KeyConfig { label: "Save".into(), action: "file.save".into(), color: [60, 110, 80] },
-                KeyConfig { label: "Print".into(), action: "file.print".into(), color: [110, 90, 60] },
+                KeyConfig { label: "Print".into(), action: "android.print".into(), color: [110, 90, 60] },
             ],
             wheel: WheelConfig { up: "view.zoomIn".into(), down: "view.zoomOut".into() },
         }
@@ -85,11 +84,9 @@ impl Pad {
         }
     }
 
-    /// Run the action a key or the wheel asked for.
-    pub fn run_pending(&mut self, ctx: &egui::Context, app: &mut WeaveApp) {
-        if let Some(action) = self.pending.take() {
-            app.run_shell_command(ctx, &action);
-        }
+    /// The action a key or the wheel asked for, if any (the shell dispatches it).
+    pub fn take_pending(&mut self) -> Option<String> {
+        self.pending.take()
     }
 
     /// Draw the strip over the window's edge.
