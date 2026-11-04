@@ -102,6 +102,12 @@ The APK lands in `target/android/weave-office-<version>-arm64-v8a.apk`. [docs/an
 has the pinned inputs and the details; [docs/android/STATUS.md](docs/android/STATUS.md) is the
 port's status log.
 
+The release key is committed (`apps/weave-office-android/android/weave-release.jks`) on purpose:
+this is a community prototype whose update channel is this repository's own releases, so the key
+only has to keep one build's updates apart from another's — and a key every build shares is what
+lets CI's APK update a locally built one. A fork that publishes its own releases should point
+`WEAVE_KEYSTORE` at its own key.
+
 ## Keeping up with upstream
 
 This repository is a fork of [Jamailar/Weave-Office](https://github.com/Jamailar/Weave-Office) with
