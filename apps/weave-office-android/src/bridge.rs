@@ -7,7 +7,9 @@
 //!  │                                   "extensions", "file_name"}
 //!  ├─ answer.json    Activity → Rust   {"id", "paths": [...], "cancelled", "error"}
 //!  ├─ inbox/<id>/    Activity → Rust   copies of the documents an Open picker returned
-//!  └─ out/<id>/      Rust → Activity   where a Save picker's document is written
+//!  ├─ out/<id>/      Rust → Activity   where a Save picker's document is written
+//!  ├─ incoming/      Activity → Rust   documents another app sent ("Open with" / "Share")
+//!  └─ documents/     Rust              where the shell moves them before opening
 //! ```
 //!
 //! Each side writes under a temporary name and renames, so the other side never reads half of
@@ -28,7 +30,7 @@ pub struct Bridge {
 impl Bridge {
     pub fn new(files_dir: &Path) -> std::io::Result<Self> {
         let root = files_dir.join("bridge");
-        for dir in ["inbox", "out"] {
+        for dir in ["inbox", "out", "incoming", "documents"] {
             fs::create_dir_all(root.join(dir))?;
         }
         Ok(Self { root, next: AtomicU64::new(1) })
@@ -64,6 +66,28 @@ impl Bridge {
             log::warn!("bridge: couldn't write the request: {error}");
         }
         id
+    }
+
+    /// Documents another app sent: move them out of `incoming/` and return their new paths,
+    /// so each is opened once and the document keeps a stable path.
+    pub fn take_incoming(&self) -> Vec<PathBuf> {
+        let Ok(entries) = fs::read_dir(self.root.join("incoming")) else {
+            return Vec::new();
+        };
+        let documents = self.root.join("documents");
+        let mut paths = Vec::new();
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let name = path.file_name().unwrap_or_default().to_owned();
+            let dest = documents.join(name);
+            if fs::rename(&path, &dest).is_ok() {
+                paths.push(dest);
+            }
+        }
+        paths
     }
 
     /// Poll the Activity's answer for `id`.
@@ -170,5 +194,18 @@ mod tests {
         assert_eq!(request["kind"], "save");
         assert_eq!(request["file_name"], "Report.docx");
         assert_eq!(request["extensions"], serde_json::json!(["docx", "doc"]));
+    }
+
+    #[test]
+    fn incoming_documents_are_moved_out_once() {
+        let (_dir, bridge) = bridge();
+        let incoming = bridge.root().join("incoming");
+        fs::write(incoming.join("1-report.docx"), b"doc").unwrap();
+        let paths = bridge.take_incoming();
+        assert_eq!(paths.len(), 1);
+        assert!(paths[0].starts_with(bridge.root().join("documents")));
+        assert!(paths[0].is_file());
+        assert!(!incoming.join("1-report.docx").exists());
+        assert!(bridge.take_incoming().is_empty(), "each document is opened once");
     }
 }

@@ -198,6 +198,10 @@ impl WeaveApp {
             _ => self.dispatch_requests(ctx, vec![(id.to_owned(), params)]),
         }
     }
+    /// Open a document another app sent (Android's "Open with" / "Share").
+    pub fn open_external(&mut self, path: PathBuf) {
+        self.actions.push_back(Action::OpenExternal(path));
+    }
     /// Reopen every copy a crashed run left as an unsaved document, then delete that run's
     /// folder once this run holds its own copies of them.
     pub fn restore_recovered(&mut self) {

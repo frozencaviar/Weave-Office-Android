@@ -61,6 +61,8 @@ public class WeaveOfficeActivity extends GameActivity {
     private String pendingName = "";
     /** The last modification time copied back for each remembered path (-1: not written yet). */
     private final Map<String, Long> written = new java.util.concurrent.ConcurrentHashMap<>();
+    /** A counter for the names of documents other apps sent. */
+    private int incomingSeq = 0;
 
     private final Runnable poll = new Runnable() {
         @Override
@@ -92,7 +94,15 @@ public class WeaveOfficeActivity extends GameActivity {
                     : android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
             getWindow().setAttributes(lp);
         }
+        handleSentDocument(getIntent());
         handler.post(poll);
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleSentDocument(intent);
     }
 
     @Override
@@ -315,6 +325,49 @@ public class WeaveOfficeActivity extends GameActivity {
         //noinspection ResultOfMethodCallIgnored
         f.delete();
         finish();
+    }
+
+    // ---- Documents from other apps ---------------------------------------------------------
+
+    /** "Open with Weave Office" and "Share to Weave Office": copy the document into the bridge. */
+    private void handleSentDocument(Intent intent) {
+        if (intent == null) {
+            return;
+        }
+        Uri uri = null;
+        if (Intent.ACTION_VIEW.equals(intent.getAction())) {
+            uri = intent.getData();
+        } else if (Intent.ACTION_SEND.equals(intent.getAction())) {
+            uri = intent.getParcelableExtra(Intent.EXTRA_STREAM);
+        }
+        if (uri == null) {
+            return;
+        }
+        // Handled: a recreated Activity mustn't open it again.
+        setIntent(new Intent(Intent.ACTION_MAIN));
+        final Uri from = uri;
+        final String name = (incomingSeq++) + "-" + safeName(nameWithExtension(uri));
+        io.execute(() -> {
+            File dir = new File(bridge, "incoming");
+            //noinspection ResultOfMethodCallIgnored
+            dir.mkdirs();
+            File tmp = new File(dir, name + ".tmp");
+            try (InputStream in = getContentResolver().openInputStream(from);
+                 OutputStream out = new FileOutputStream(tmp)) {
+                if (in == null) {
+                    throw new IOException("the provider returned no data");
+                }
+                copy(in, out);
+            } catch (Exception e) {
+                Log.e(TAG, "incoming " + from, e);
+                //noinspection ResultOfMethodCallIgnored
+                tmp.delete();
+                return;
+            }
+            if (!tmp.renameTo(new File(dir, name))) {
+                Log.e(TAG, "incoming: rename failed");
+            }
+        });
     }
 
     // ---- Helpers ---------------------------------------------------------------------------

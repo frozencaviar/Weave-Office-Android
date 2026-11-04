@@ -51,6 +51,7 @@ fn run(android: AndroidApp) -> Result<(), String> {
     });
 
     let shell_android = android.clone();
+    let shell_bridge = bridge.clone();
     let pad = crate::pad::Pad::new(&files_dir);
     let mut options = eframe::NativeOptions {
         renderer: eframe::Renderer::Wgpu,
@@ -72,10 +73,12 @@ fn run(android: AndroidApp) -> Result<(), String> {
             Ok(Box::new(Shell {
                 app,
                 android: shell_android,
+                bridge: shell_bridge,
                 ime: String::new(),
                 editing: false,
                 pad,
                 touch: crate::touch::TouchScroll::new(),
+                layout_checked: false,
             }))
         }),
     )
@@ -86,6 +89,8 @@ fn run(android: AndroidApp) -> Result<(), String> {
 struct Shell {
     app: WeaveApp,
     android: AndroidApp,
+    /// The file bridge: the Activity's answers and the documents other apps sent.
+    bridge: std::sync::Arc<crate::bridge::Bridge>,
     /// The keyboard's text as of the last frame.
     ime: String,
     /// Whether a text field had focus last frame.
@@ -94,6 +99,8 @@ struct Shell {
     pad: crate::pad::Pad,
     /// Two-finger scrolling, which winit's Android backend doesn't emit.
     touch: crate::touch::TouchScroll,
+    /// Whether the phone-or-tablet layout has been chosen for this window.
+    layout_checked: bool,
 }
 
 impl Shell {
@@ -152,6 +159,18 @@ impl eframe::App for Shell {
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         self.app.logic(ctx, frame);
         self.pad.run_pending(ctx, &mut self.app);
+        // Documents another app sent ("Open with" / "Share").
+        for path in self.bridge.take_incoming() {
+            self.app.open_external(path);
+        }
+        // A phone-class screen gets the interface at 75%, Android's own phone/tablet line.
+        if !self.layout_checked {
+            self.layout_checked = true;
+            let screen = ctx.viewport_rect();
+            if screen.width().min(screen.height()) < 600.0 {
+                ctx.set_zoom_factor(0.75);
+            }
+        }
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
